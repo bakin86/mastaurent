@@ -6,7 +6,9 @@ import { verifyAccess } from './lib/jwt.js';
 
 let io: Server | null = null;
 export function startRealtime(server: HttpServer) {
-  io = new Server(server, { cors: { origin: env.webOrigin, credentials: true } });
+  // CORS-ыг HTTP талтай ижил байлгана — эс бол самбарын realtime холболт
+  // preview домэйн дээр чимээгүй тасарна.
+  io = new Server(server, { cors: { origin: env.webOrigins, credentials: true } });
   io.on('connection', (socket) => {
     socket.on('track-order', async (token: string) => {
       if (typeof token !== 'string') return;

@@ -218,7 +218,7 @@ export function Checkout() {
               </Field>
               <div>
                 <Button type="button" variant="secondary" onClick={() => navigator.geolocation?.getCurrentPosition((p) => { setPoint({ latitude: p.coords.latitude, longitude: p.coords.longitude }); toast.success('Газрын зурагт хүргэх цэг сонгогдлоо'); }, () => toast.error('Байршил авах зөвшөөрөл хэрэгтэй'))}>Одоогийн байршлыг хүргэх цэг болгох</Button>
-                <p className="mt-2 text-xs text-muted">{point ? `${point.latitude.toFixed(5)}, ${point.longitude.toFixed(5)}` : 'Хүргэх цэг сонгоогүй'}</p>
+                <p className="mt-2 text-xs text-muted">{point ? `${point.latitude.toFixed(5)}, ${point.longitude.toFixed(5)}` : 'Заавал биш — жолоочид хөтөч болгоход тусална'}</p>
               </div>
             </>
           ) : (

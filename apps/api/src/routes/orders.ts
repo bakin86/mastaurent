@@ -157,8 +157,22 @@ ordersRouter.post(
       if ((body.addressLine ?? '').trim().length < 4) {
         throw badRequest('Хаягаа дэлгэрэнгүй бичнэ үү');
       }
-      if (body.deliveryLat == null || body.deliveryLng == null) throw badRequest('Хүргэх хаягаа газрын зураг дээр сонгоно уу');
-      if (tenant.latitude != null && tenant.longitude != null && distanceKm(tenant.latitude, tenant.longitude, body.deliveryLat, body.deliveryLng) > tenant.deliveryRadiusKm) throw badRequest(`Хаяг хүргэлтийн ${tenant.deliveryRadiusKm} км бүсээс гадуур байна`);
+      // Газрын зураг дээр цэг тавих нь СОНГОЛТ. Дүүрэг + дэлгэрэнгүй хаяг
+      // хүргэлтэд хангалттай; цэг заавал шаардвал захиалга өгөх урсгал
+      // дэмий тасалдана.
+      //
+      // Цэг тавьсан бол л бүсийн шалгалтыг хийнэ — тавиагүй үед зайг
+      // тооцох боломжгүй тул шалгах ч зүйлгүй.
+      if (
+        body.deliveryLat != null &&
+        body.deliveryLng != null &&
+        tenant.latitude != null &&
+        tenant.longitude != null &&
+        distanceKm(tenant.latitude, tenant.longitude, body.deliveryLat, body.deliveryLng) >
+          tenant.deliveryRadiusKm
+      ) {
+        throw badRequest(`Хаяг хүргэлтийн ${tenant.deliveryRadiusKm} км бүсээс гадуур байна`);
+      }
     }
 
     const { lines, subtotal } = priceOrder(body.items, menuItems, groups);

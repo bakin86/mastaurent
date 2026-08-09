@@ -44,10 +44,30 @@ export const wireConfigured = Boolean(wire.secretKey);
 export const PAYMENT_SETUP_HINT =
   'Онлайн төлбөр тохируулаагүй байна. QPay, Wire (WIRE_SECRET_KEY) эсвэл Stripe-г apps/api/.env файлд тавина уу.';
 
+/**
+ * WEB_ORIGIN-ыг таслалаар салгана. Төгсгөлийн ташуу зураасыг авч хаяна —
+ * "https://app.vercel.app/" гэж бичсэн ч CORS дээр таарахгүй болохоос
+ * сэргийлнэ (Origin толгой ХЭЗЭЭ Ч ташуу зураасаар төгсдөггүй).
+ */
+const webOrigins = (process.env.WEB_ORIGIN ?? 'http://localhost:5173')
+  .split(',')
+  .map((o) => o.trim().replace(/\/+$/, ''))
+  .filter(Boolean);
+
 export const env = {
   port: Number(process.env.PORT ?? 4000),
   nodeEnv: process.env.NODE_ENV ?? 'development',
-  webOrigin: process.env.WEB_ORIGIN ?? 'http://localhost:5173',
+  /**
+   * Web-ийн хаяг. Таслалаар тусгаарлаж ОЛОН хаяг өгч болно —
+   * Vercel нь preview deploy бүрт өөр домэйн үүсгэдэг тул хэрэгтэй.
+   *
+   *   WEB_ORIGIN=https://app.vercel.app,https://app-git-dev.vercel.app
+   *
+   * Stripe-ийн буцах зам зэрэг НЭГ хаяг шаардсан газарт эхнийхийг нь
+   * хэрэглэнэ; CORS-д бүгдийг нь зөвшөөрнө.
+   */
+  webOrigin: webOrigins[0],
+  webOrigins,
   /** QPay callback болон Stripe redirect энэ хаяг руу буцна. */
   publicApiUrl: process.env.PUBLIC_API_URL ?? `http://localhost:${process.env.PORT ?? 4000}`,
   accessSecret: secret('JWT_ACCESS_SECRET', 'dev-access-secret-solino'),

@@ -31,7 +31,9 @@ app.use(helmet());
 
 // Dev дээр л дурын localhost порт зөвшөөрнө. Regex-ийг эхнээс нь тогтоосон —
 // өмнө нь "...localhost:3000"-оор төгссөн дурын домэйн тохирдог байв.
-const allowedOrigins = env.isProd ? [env.webOrigin] : [env.webOrigin, /^http:\/\/localhost:\d+$/];
+const allowedOrigins = env.isProd
+  ? env.webOrigins
+  : [...env.webOrigins, /^http:\/\/localhost:\d+$/];
 app.use(cors({ origin: allowedOrigins, credentials: true }));
 
 // Stripe-ийн гарын үсэг ЗӨВХӨН түүхий биет дээр тооцогддог тул энэ зам
@@ -64,7 +66,7 @@ app.use(errorHandler);
 
 const server = app.listen(env.port, () => {
   console.log(`\n  Masteurent API  →  http://localhost:${env.port}/api`);
-  console.log(`             Web  →  ${env.webOrigin}`);
+  console.log(`             Web  →  ${env.webOrigins.join(', ')}`);
   console.log('');
 });
 startRealtime(server);
