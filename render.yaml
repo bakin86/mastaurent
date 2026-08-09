@@ -5,7 +5,11 @@ services:
     plan: free
     region: singapore
     # Workspace root-оос суулгана — apps/api нь npm workspace гишүүн.
-    buildCommand: npm ci && npx prisma generate --schema apps/api/prisma/schema.prisma && npm run build -w @hool/api
+    #
+    # `--include=dev` ЗААВАЛ: доор NODE_ENV=production тавьсан тул `npm ci`
+    # анхдагчаар devDependencies-ийг алгасна. Гэтэл `tsc` (build) болон
+    # `prisma` CLI (generate) хоёул devDependencies дотор байгаа.
+    buildCommand: npm ci --include=dev && npx prisma generate --schema apps/api/prisma/schema.prisma && npm run build -w @hool/api
     startCommand: npm run start -w @hool/api
     healthCheckPath: /api/payments/providers
     envVars:
