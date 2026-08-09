@@ -77,7 +77,8 @@ export const env = {
   qpay,
   stripe,
   wire,
-  verifyMnApiKey: process.env.VERIFY_MN_API_KEY ?? 'vrf_wLxHceFivnL8c3v4hH_oifCiwUlhAGdv',
+  // Түлхүүрийг ЭНД БИЧИХГҮЙ — зөвхөн apps/api/.env дотор.
+  verifyMnApiKey: process.env.VERIFY_MN_API_KEY ?? '',
   isProd,
 };
 
