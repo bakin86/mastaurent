@@ -115,7 +115,11 @@ paymentsRouter.post(
       };
       const paymentId = session.client_reference_id;
       if (paymentId && session.payment_status === 'paid') {
-        await markPaid(paymentId, session.payment_intent ?? null);
+        // Сүбскрипшний session-ы client_reference_id нь рестораны хүсэлтийн
+        // id — `payments` дотор мөр байхгүй. Тэр тохиолдолд чимээгүй өнгөрнө,
+        // эс бол Stripe 404 аваад webhook-оо дахин дахин илгээнэ.
+        const exists = await prisma.payment.findUnique({ where: { id: paymentId } });
+        if (exists) await markPaid(paymentId, session.payment_intent ?? null);
       }
     }
 

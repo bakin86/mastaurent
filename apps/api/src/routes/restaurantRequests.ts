@@ -157,32 +157,42 @@ requestsRouter.post(
 
     const fee = body.plan === 'FRANCHISE' ? 350000 : body.plan === 'PREMIUM' ? 150000 : 50000;
 
-    let checkoutUrl: string | null = null;
-    let sessionId: string | null = null;
+    // Хүсэлтийг Stripe session-ЭЭС ӨМНӨ үүсгэнэ.
+    //
+    // Урвуугаар нь хийвэл session амжилттай үүсээд мөр үүсгэх алхам уначихвал
+    // хэрэглэгч төлчихөөд, тэр төлбөр нь ямар ч хүсэлттэй холбогдоогүй үлдэнэ
+    // — DB дээр огт ул мөргүй. Сүбскрипшнд `payments` мөр үүсгэдэггүй тул
+    // (Payment.orderId заавал шаарддаг) хүсэлтийн мөр л ганц бүртгэл болно.
+    const created = await prisma.restaurantRequest.create({
+      data: { ...body, monthlyFee: fee, accountId, status: 'PENDING' },
+      select: { id: true },
+    });
 
+    let checkoutUrl: string | null = null;
     try {
       const back = `${env.webOrigin}/restaurant-request`;
       const session = await createCheckoutSession({
-        paymentId: `sub_${Date.now()}`,
+        // Хүсэлтийн жинхэнэ id — Stripe-ийн client_reference_id болно.
+        // Ингэснээр гүйлгээ Stripe талаас ч хүсэлт рүүгээ мөрдөгдөнө.
+        paymentId: created.id,
         amount: fee,
         description: `Masteurent Сүбскрипшн (${body.plan}) - ${body.name}`,
         successUrl: `${back}?success=1`,
         cancelUrl: `${back}?cancelled=1`,
       });
-      sessionId = session.id;
       checkoutUrl = session.url ?? null;
+      await prisma.restaurantRequest.update({
+        where: { id: created.id },
+        data: { note: `STRIPE:${session.id}|${checkoutUrl}` },
+      });
     } catch (e) {
+      // Session үүсээгүй ч хүсэлт PENDING-ээр үлдэнэ — админ гараар
+      // зөвшөөрч болно, харин мөнгө алга болохгүй.
       console.error('Stripe subscription session creation failed:', e);
     }
 
-    const request = await prisma.restaurantRequest.create({
-      data: {
-        ...body,
-        monthlyFee: fee,
-        accountId,
-        status: 'PENDING',
-        note: sessionId ? `STRIPE:${sessionId}|${checkoutUrl}` : body.note,
-      },
+    const request = await prisma.restaurantRequest.findUniqueOrThrow({
+      where: { id: created.id },
       select: publicRequest,
     });
 

@@ -403,8 +403,40 @@ const STATUSES: OrderStatus[] = [
   'CANCELLED',
 ];
 
+/**
+ * Seed нь ХАМАГ өгөгдлийг устгадаг — захиалга, төлбөр, данс, ресторан бүгд.
+ *
+ * Deploy хийсний дараа буруу ажиллуулбал бодит хэрэглэгчийн өгөгдөл, төлсөн
+ * сүбскрипшний хүсэлт хормын дотор алга болно. Тиймээс дор хаяж нэг бодит
+ * ул мөр байвал зогсоно. Зориуд дарж өнгөрөх бол FORCE_SEED=1.
+ */
+async function assertSafeToWipe() {
+  if (process.env.FORCE_SEED === '1') {
+    console.warn('⚠  FORCE_SEED=1 — шалгалтыг алгасаж, бүх өгөгдлийг устгана.\n');
+    return;
+  }
+
+  const [requests, orders] = await Promise.all([
+    prisma.restaurantRequest.count(),
+    prisma.order.count(),
+  ]);
+
+  // Seed-ийн үүсгэсэн захиалгууд байдаг тул захиалга дангаараа шинж тэмдэг
+  // биш. Харин рестораны хүсэлт seed-ээс ХЭЗЭЭ Ч үүсдэггүй — байна гэвэл
+  // бодит хүн гаргасан, магадгүй төлбөр төлсөн гэсэн үг.
+  if (requests > 0) {
+    throw new Error(
+      `Энэ санд ${requests} рестораны хүсэлт байна (захиалга: ${orders}).\n` +
+        'Seed бүгдийг устгах тул зогслоо. Үнэхээр цэвэрлэх бол:\n' +
+        '  FORCE_SEED=1 npm run db:seed\n',
+    );
+  }
+}
+
 async function main() {
   const passwordHash = await bcrypt.hash('123456', 10);
+
+  await assertSafeToWipe();
 
   console.log('Хуучин өгөгдлийг цэвэрлэж байна...');
   await prisma.payment.deleteMany();
