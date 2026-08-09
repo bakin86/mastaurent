@@ -20,7 +20,14 @@ adminRouter.get(
 
     const accounts = await prisma.account.findMany({
       where: search
-        ? { OR: [{ name: { contains: search } }, { email: { contains: search } }] }
+        ? {
+            // Postgres дээр `contains` нь LIKE — том/жижиг үсэг ЯЛГАНА.
+            // MySQL-ийн collation ялгадаггүй байсан тул энэ нь заавал.
+            OR: [
+              { name: { contains: search, mode: 'insensitive' as const } },
+              { email: { contains: search, mode: 'insensitive' as const } },
+            ],
+          }
         : {},
       orderBy: { createdAt: 'desc' },
       take: 200,

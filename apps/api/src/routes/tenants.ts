@@ -48,7 +48,15 @@ tenantsRouter.get(
     const tenants = await prisma.tenant.findMany({
       where: { isActive: true, isTemporarilyClosed: false,
         ...(category ? { category } : {}), ...(minRating ? { rating: { gte: minRating } } : {}),
-        ...(search ? { OR: [{ name: { contains: search } }, { category: { contains: search } }] } : {}),
+        // Postgres дээр `contains` нь том/жижиг үсэг ялгадаг тул insensitive заана.
+        ...(search
+          ? {
+              OR: [
+                { name: { contains: search, mode: 'insensitive' as const } },
+                { category: { contains: search, mode: 'insensitive' as const } },
+              ],
+            }
+          : {}),
       },
       orderBy: { createdAt: 'asc' },
       select: {
