@@ -20,6 +20,10 @@ export function DashboardLayout({ roles, base = '/dashboard' }: { roles?: Role[]
   });
 
   // Ажилтны tenant-ыг бүх хүсэлтэд наана + brand өнгийг тохируулна.
+  //
+  // Самбараас гармагц буцааж цэвэрлэнэ — StorefrontLayout ч мөн адил хийдэг.
+  // Цэвэрлэхгүй бол ажилтны ресторан наалдаад үлдэж, дараа нь өөр ресторан
+  // руу зочноор орход хүсэлтүүд буруу tenant рүү явна.
   useEffect(() => {
     if (!data) return;
     setActiveTenant(data.slug);
@@ -27,6 +31,8 @@ export function DashboardLayout({ roles, base = '/dashboard' }: { roles?: Role[]
     document.documentElement.style.setProperty('--accent-soft', `${data.accentColor}1f`);
     document.title = `${data.name} — самбар`;
   }, [data]);
+
+  useEffect(() => () => setActiveTenant(null), []);
 
   if (!ready) {
     return (

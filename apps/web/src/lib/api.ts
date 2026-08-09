@@ -47,7 +47,10 @@ export async function api<T>(path: string, opts: Options = {}): Promise<T> {
   // Токен 15 минут насалдаг — доор 401 дээр refresh cookie-гоор сэргээнэ.
   if (localToken) headers.Authorization = `Bearer ${localToken}`;
 
-  const tenant = opts.tenant ?? activeTenantSlug ?? tenantFromPath();
+  // Хаяг дахь /t/<slug> нь ХАМГИЙН хүчтэй дохио — хэрэглэгч яг одоо тэнд
+  // байна. `activeTenantSlug` бол наалдамхай глобал утга; хуучин ресторан
+  // дээр тогтоод үлдвэл захиалга, гишүүнчлэл буруу ресторанаас асуугдана.
+  const tenant = opts.tenant ?? tenantFromPath() ?? activeTenantSlug;
   if (tenant) headers['X-Tenant'] = tenant;
 
   let res: Response;
