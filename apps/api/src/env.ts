@@ -86,5 +86,11 @@ export const verifyMnConfigured = Boolean(env.verifyMnApiKey);
 
 
 
-// Production дээр тохиргоогүй ажиллуулах нь алдаа — тэнд шууд зогсооно.
-if (isProd && !clerkConfigured) throw new Error(SETUP_HINT);
+/**
+ * Clerk бол СОНГОЛТ — нэвтрэлтийн үндсэн зам нь Verify.MN утас + өөрийн JWT.
+ *
+ * Өмнө нь энд production дээр Clerk байхгүй бол шидэлт хийж, серверийг огт
+ * асаахгүй байсан. Clerk-гүйгээр бүх урсгал ажилладаг болсон тул энэ нь
+ * зөвхөн deploy-г унагаах үүрэгтэй үлдсэн. Одоо анхааруулаад өнгөрнө.
+ */
+if (isProd && !clerkConfigured) console.warn(`[api] ${SETUP_HINT}`);

@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { io } from 'socket.io-client';
+import { SOCKET_URL } from '../../lib/config';
 import { motion } from 'framer-motion';
 import {
   ArrowLeft,
@@ -53,7 +54,7 @@ export function OrderTrack() {
     refetchInterval: 10000, // төлөв өөрчлөгдвөл автоматаар шинэчилнэ
   });
   useQuery({ queryKey: ['driver-location', token], queryFn: async () => { const d = await api<{ location: { currentLat: number; currentLng: number; lastPingAt: string } | null }>(`/locations/track/${token}`); if (d.location) setDriverPoint({ latitude: d.location.currentLat, longitude: d.location.currentLng, at: d.location.lastPingAt }); return d; }, refetchInterval: 5000 });
-  useEffect(() => { const socket = io(); socket.emit('track-order', token); socket.on('driver-location', (p) => setDriverPoint(p)); socket.on('order-status', () => void qc.invalidateQueries({ queryKey: ['order', slug, token] })); return () => { socket.disconnect(); }; }, [token, slug, qc]);
+  useEffect(() => { const socket = io(SOCKET_URL); socket.emit('track-order', token); socket.on('driver-location', (p) => setDriverPoint(p)); socket.on('order-status', () => void qc.invalidateQueries({ queryKey: ['order', slug, token] })); return () => { socket.disconnect(); }; }, [token, slug, qc]);
 
   if (isLoading) {
     return (

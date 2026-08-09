@@ -1,0 +1,12 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "buildCommand": "npm run build",
+  "outputDirectory": "dist",
+  "rewrites": [
+    {
+      "comment": "React Router нь клиент талын чиглүүлэгч. /director/orders зэрэг гүн хаяг руу шууд орох, эсвэл F5 дарахад Vercel 404 өгөхгүйн тулд бүх замыг index.html руу буцаана.",
+      "source": "/(.*)",
+      "destination": "/index.html"
+    }
+  ]
+}

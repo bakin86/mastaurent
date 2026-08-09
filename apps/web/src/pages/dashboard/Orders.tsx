@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { io } from 'socket.io-client';
+import { SOCKET_URL } from '../../lib/config';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { AnimatePresence, motion } from 'framer-motion';
 import { ClipboardList, Phone, TrendingUp, Wallet } from 'lucide-react';
@@ -31,7 +32,7 @@ export function DashboardOrders() {
   const [filter, setFilter] = useState('ALL');
   const qc = useQueryClient();
   useEffect(() => {
-    const socket = io();
+    const socket = io(SOCKET_URL);
     const token = getLocalToken();
     if (token) socket.emit('join-tenant', token);
     socket.on('new-order', (order: { orderNo: number }) => {

@@ -1,4 +1,4 @@
-const BASE = '/api';
+import { API_BASE as BASE } from './config';
 
 let activeTenantSlug: string | null = null;
 

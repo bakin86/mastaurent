@@ -3,7 +3,7 @@ generator client {
 }
 
 datasource db {
-  provider = "mysql"
+  provider = "postgresql"
   url      = env("DATABASE_URL")
 }
 
@@ -494,7 +494,7 @@ model Payment {
   transactionId String?
   paymentUrl    String? @db.Text // Stripe checkout URL / QPay богино холбоос
   qrText        String? @db.Text // QPay QR-ийн түүхий текст
-  qrImage       String? @db.LongText // QPay QR зураг (base64)
+  qrImage       String? @db.Text // QPay QR зураг (base64)
 
   paidAt    DateTime?
   createdAt DateTime  @default(now())
