@@ -1,4 +1,4 @@
-import { Link, NavLink } from 'react-router-dom';
+import { Link, NavLink, Navigate } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { ArrowLeft } from 'lucide-react';
 import { toast } from 'sonner';
@@ -17,7 +17,21 @@ export function AdminShell({
   subtitle?: string;
   children: React.ReactNode;
 }) {
-  const { account } = useAccount();
+  const { account, ready, isSignedIn } = useAccount();
+
+  // AdminRequests-тэй ижил хамгаалалт. Сервер тал `requirePlatformAdmin`-аар
+  // хаалттай тул өгөгдөл алдагдахгүй ч, эрхгүй хүнд админы бүрхүүл
+  // харагдаад хоосон жагсаалт үзүүлэх нь эвгүй.
+  if (!ready) {
+    return (
+      <Page className="mx-auto max-w-4xl px-5 pt-12 sm:px-8">
+        <Skeleton className="h-8 w-56" />
+        <Skeleton className="mt-6 h-32" />
+      </Page>
+    );
+  }
+
+  if (!isSignedIn || !account?.isPlatformAdmin) return <Navigate to="/" replace />;
 
   return (
     <Page className="mx-auto max-w-4xl px-5 pt-12 sm:px-8">

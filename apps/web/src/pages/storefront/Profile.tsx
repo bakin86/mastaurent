@@ -4,14 +4,14 @@ import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { Building2, LayoutDashboard, LogOut, Phone, ShieldCheck, Store, UserRound } from 'lucide-react';
 import { useMember, useSignOut, isStaff } from '../../store/auth';
 import { useTenant } from '../../layouts/StorefrontLayout';
-import { Button, Card, EmptyState, Page } from '../../components/ui';
+import { Button, Card, EmptyState, Page, Skeleton } from '../../components/ui';
 import { api } from '../../lib/api';
 
 export function Profile() {
   const { slug = '' } = useParams();
   const tenant = useTenant();
   const navigate = useNavigate();
-  const { user } = useMember(slug);
+  const { user, ready } = useMember(slug);
   const signOut = useSignOut();
   const qc = useQueryClient();
   const [editing, setEditing] = useState(false);
@@ -21,6 +21,17 @@ export function Profile() {
     mutationFn: () => api('/auth/me', { method: 'PATCH', body: { name, phone } }),
     onSuccess: () => { setEditing(false); void qc.invalidateQueries({ queryKey: ['membership'] }); void qc.invalidateQueries({ queryKey: ['account'] }); },
   });
+
+  // Гишүүнчлэл ачаалагдаж дуустал "нэвтрээгүй" гэж БҮҮ хэл — нэвтэрсэн
+  // хүнд эхлээд буруу мессеж анивчихаас сэргийлнэ.
+  if (!ready) {
+    return (
+      <Page className="mx-auto max-w-lg px-5 pt-8">
+        <h1 className="text-[28px] font-semibold tracking-[-0.03em]">Профайл</h1>
+        <Skeleton className="mt-6 h-28" />
+      </Page>
+    );
+  }
 
   if (!user) {
     return (

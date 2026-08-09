@@ -10,7 +10,7 @@ import { Badge, Button, Card, EmptyState, Page, Skeleton } from '../../component
 export function StorefrontOrders() {
   const { slug = '' } = useParams();
   const navigate = useNavigate();
-  const { user } = useMember(slug);
+  const { user, ready } = useMember(slug);
   const qc = useQueryClient();
   const cancel = useMutation({ mutationFn: (id: string) => api(`/orders/mine/${id}/cancel`, { method: 'PATCH' }), onSuccess: () => void qc.invalidateQueries({ queryKey: ['my-orders', slug] }) });
 
@@ -30,7 +30,10 @@ export function StorefrontOrders() {
         хадгалагдана.
       </p>
 
-      {!user ? (
+      {!ready ? (
+        // Гишүүнчлэл тодрох хүртэл "нэвтэрч орно уу" гэж БҮҮ хэл.
+        <Skeleton className="mt-6 h-28" />
+      ) : !user ? (
         <EmptyState
           icon={<ReceiptText size={30} strokeWidth={1.5} />}
           title="Нэвтэрч орно уу"
