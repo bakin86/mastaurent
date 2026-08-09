@@ -17,15 +17,67 @@ staffRouter.get('/', requireStaff, requireRole('DIRECTOR', 'MANAGER'), asyncHand
   res.json({ staff });
 }));
 
-const createSchema = z.object({
-  email: z.string().email(),
-  role: z.enum(STAFF_ROLES),
-});
+/**
+ * Утасны дугаар ЭСВЭЛ и-мэйл.
+ *
+ * Нэвтрэлт Verify.MN утсаар болсон тул ихэнх дансанд и-мэйл нь
+ * `<утас>@phone.hool.mn` гэж автоматаар үүссэн байдаг — тэрийг эзэн нь ч
+ * мэддэггүй. Тиймээс утсаар хайх боломжийг заавал өгнө.
+ *
+ * `email`-ийг хуучин нэрээр нь хүлээж авсаар байна: web (Vercel) болон api
+ * (Render) тусдаа deploy болдог тул шинэ api хуучин web-тэй хэдэн минут
+ * зэрэгцэн ажиллана. Тэр зайд ажилтан нэмэх нь унах ёсгүй.
+ */
+const createSchema = z
+  .object({
+    identifier: z.string().min(4).optional(),
+    email: z.string().min(4).optional(),
+    role: z.enum(STAFF_ROLES),
+  })
+  .transform((v, ctx) => {
+    const identifier = (v.identifier ?? v.email ?? '').trim();
+    if (identifier.length < 4) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'Утасны дугаар эсвэл и-мэйл оруулна уу' });
+      return z.NEVER;
+    }
+    return { identifier, role: v.role };
+  });
+
+/**
+ * Оруулсан утгаас Prisma-гийн `where` бүтээнэ.
+ *
+ * Утас нь баазад ялгаатай хэлбэрээр хадгалагдсан байдаг: `/auth/phone/verify`
+ * нь `+976`-г таслаад 8 оронтойг нь үлдээдэг бол `/auth/register` нь
+ * хэрэглэгчийн бичсэнээр нь шууд хадгалдаг (`+97688746068` ч байж болно).
+ * Тиймээс хоёр талыг нь сүүлийн 8 оронгоор жишнэ — Монголын дугаар яг тэр
+ * 8 орон. Урдаас нь `976`-г таслах гэвэл `97612345` гэсэн ЖИНХЭНЭ дугаарыг
+ * мохоох тул тэгэхгүй.
+ *
+ * Тохирох зүйлгүй бол `null`.
+ */
+export function accountLookup(identifier: string) {
+  const raw = identifier.trim();
+
+  // Postgres дээр `equals` том/жижиг үсэг ялгадаг тул insensitive заана.
+  if (raw.includes('@')) return { email: { equals: raw, mode: 'insensitive' as const } };
+
+  const digits = raw.replace(/\D/g, '');
+  if (digits.length < 8) return null;
+  return { phone: { endsWith: digits.slice(-8) } };
+}
+
+/** Оруулсан утгыг и-мэйл эсвэл утас гэж үзээд данс хайна. */
+async function findAccountBy(identifier: string) {
+  const where = accountLookup(identifier);
+  return where && prisma.account.findFirst({ where });
+}
 
 staffRouter.post('/', requireStaff, requireRole('DIRECTOR'), asyncHandler(async (req, res) => {
   const body = createSchema.parse(req.body);
-  const account = await prisma.account.findUnique({ where: { email: body.email } });
-  if (!account) throw badRequest('Энэ и-мэйлтэй хэрэглэгч эхлээд системд бүртгүүлсэн байх ёстой');
+  const account = await findAccountBy(body.identifier);
+  if (!account) {
+    throw badRequest('Ийм хэрэглэгч олдсонгүй. Тэр хүн эхлээд утсаараа нэг удаа нэвтэрсэн байх ёстой.');
+  }
   const member = await prisma.user.upsert({
     where: { tenantId_accountId: { tenantId: req.tenantId!, accountId: account.id } },
     update: { role: body.role, isActive: true },
