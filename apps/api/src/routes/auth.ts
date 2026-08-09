@@ -1,0 +1,202 @@
+import { Router } from 'express';
+import bcrypt from 'bcryptjs';
+import { z } from 'zod';
+import { prisma } from '../db.js';
+import { clerkConfigured } from '../env.js';
+import { asyncHandler, badRequest, notFound, unauthorized } from '../lib/http.js';
+import {
+  REFRESH_COOKIE,
+  clearRefreshCookie,
+  setRefreshCookie,
+  signAccess,
+  signRefresh,
+  verifyRefresh,
+} from '../lib/jwt.js';
+import { authLimiter } from '../lib/rateLimit.js';
+import { requireAccount, requireMember, requireStaff } from '../middleware/auth.js';
+import { resolveTenant } from '../middleware/tenant.js';
+
+/**
+ * Платформын нэвтрэлт — ресторанаас хамааралгүй.
+ *
+ * Нэг удаа бүртгүүлээд бүх ресторанд хандана. Ресторан бүр дэх профайл нь
+ * тухайн ресторанд анх хандахад автоматаар үүснэ (`ensureMembership`).
+ */
+export const authRouter = Router();
+
+const publicAccount = {
+  id: true,
+  name: true,
+  email: true,
+  phone: true,
+  isPlatformAdmin: true,
+} as const;
+
+authRouter.get('/methods', (_req, res) => res.json({ password: true, clerk: clerkConfigured }));
+
+type SafeAccount = { id: string; tokenVersion: number };
+const payloadOf = (a: SafeAccount) => ({ sub: a.id, tv: a.tokenVersion });
+const issue = (res: Parameters<typeof setRefreshCookie>[0], a: SafeAccount) =>
+  setRefreshCookie(res, signRefresh(payloadOf(a)));
+
+const registerSchema = z.object({
+  name: z.string().min(2, 'Нэр хамгийн багадаа 2 тэмдэгт'),
+  email: z.string().email('И-мэйл буруу байна'),
+  phone: z.string().min(8, 'Утасны дугаар 8 оронтой байна').max(12),
+  password: z.string().min(6, 'Нууц үг хамгийн багадаа 6 тэмдэгт'),
+});
+
+authRouter.post(
+  '/register',
+  authLimiter,
+  asyncHandler(async (req, res) => {
+    const body = registerSchema.parse(req.body);
+
+    const exists = await prisma.account.findUnique({ where: { email: body.email } });
+    if (exists) throw badRequest('Энэ и-мэйл бүртгэлтэй байна');
+
+    const account = await prisma.account.create({
+      data: {
+        name: body.name,
+        email: body.email,
+        phone: body.phone,
+        passwordHash: await bcrypt.hash(body.password, 10),
+      },
+      select: { ...publicAccount, tokenVersion: true },
+    });
+
+    const { tokenVersion, ...safe } = account;
+    issue(res, account);
+    res.status(201).json({ user: safe, accessToken: signAccess(payloadOf(account)) });
+  }),
+);
+
+const loginSchema = z.object({
+  email: z.string().email('И-мэйл буруу байна'),
+  password: z.string().min(1, 'Нууц үгээ оруулна уу'),
+});
+
+authRouter.post(
+  '/login',
+  authLimiter,
+  asyncHandler(async (req, res) => {
+    const body = loginSchema.parse(req.body);
+    const account = await prisma.account.findUnique({ where: { email: body.email } });
+    if (!account) throw unauthorized('И-мэйл эсвэл нууц үг буруу');
+
+    // Clerk-ээр бүртгүүлсэн дансанд нууц үг байхгүй.
+    if (!account.passwordHash) {
+      throw unauthorized('Энэ бүртгэл нууц үггүй. Google-ээр нэвтэрнэ үү.');
+    }
+    if (!(await bcrypt.compare(body.password, account.passwordHash))) {
+      throw unauthorized('И-мэйл эсвэл нууц үг буруу');
+    }
+
+    const safe = {
+      id: account.id,
+      name: account.name,
+      email: account.email,
+      phone: account.phone,
+      isPlatformAdmin: account.isPlatformAdmin,
+    };
+    issue(res, account);
+    res.json({ user: safe, accessToken: signAccess(payloadOf(account)) });
+  }),
+);
+
+/** Refresh cookie-гоор шинэ access token авна. */
+authRouter.post(
+  '/refresh',
+  asyncHandler(async (req, res) => {
+    const token = req.cookies?.[REFRESH_COOKIE];
+    if (!token) throw unauthorized('Сесс дууссан байна');
+
+    let payload;
+    try {
+      payload = verifyRefresh(token);
+    } catch {
+      throw unauthorized('Сесс хүчингүй байна');
+    }
+
+    const account = await prisma.account.findUnique({
+      where: { id: payload.sub },
+      select: { ...publicAccount, tokenVersion: true },
+    });
+    if (!account) throw unauthorized('Хэрэглэгч олдсонгүй');
+
+    if (account.tokenVersion !== payload.tv) {
+      clearRefreshCookie(res);
+      throw unauthorized('Сесс хүчингүй болсон байна');
+    }
+
+    const { tokenVersion, ...safe } = account;
+    res.json({ user: safe, accessToken: signAccess(payloadOf(account)) });
+  }),
+);
+
+/** Гарах — tokenVersion ахиулж бүх хуучин токеныг хүчингүй болгоно. */
+authRouter.post(
+  '/logout',
+  asyncHandler(async (req, res) => {
+    const token = req.cookies?.[REFRESH_COOKIE];
+    if (token) {
+      try {
+        const payload = verifyRefresh(token);
+        await prisma.account.update({
+          where: { id: payload.sub },
+          data: { tokenVersion: { increment: 1 } },
+        });
+      } catch {
+        // Токен хүчингүй/данс устсан — cookie цэвэрлэхэд л хангалттай.
+      }
+    }
+    clearRefreshCookie(res);
+    res.json({ ok: true });
+  }),
+);
+
+/** Платформын данс. Ресторан заахгүй — нэвтэрсэн эсэхийг мэдэхэд хангалттай. */
+authRouter.get('/me', requireAccount, (req, res) => res.json({ user: req.account }));
+
+const profileSchema = z.object({
+  name: z.string().min(2).max(80).optional(),
+  phone: z.string().min(8).max(20).nullable().optional(),
+});
+authRouter.patch('/me', requireAccount, asyncHandler(async (req, res) => {
+  const data = profileSchema.parse(req.body);
+  const user = await prisma.$transaction(async (tx) => {
+    const account = await tx.account.update({ where: { id: req.account!.id }, data, select: publicAccount });
+    await tx.user.updateMany({ where: { accountId: req.account!.id }, data: { ...(data.name ? { name: data.name } : {}), ...(data.phone !== undefined ? { phone: data.phone } : {}) } });
+    return account;
+  });
+  res.json({ user });
+}));
+
+/** Тухайн рестораны профайл. Байхгүй бол энд үүснэ. */
+authRouter.get(
+  '/membership',
+  resolveTenant,
+  requireMember,
+  asyncHandler(async (req, res) => {
+    const user = await prisma.user.findUnique({
+      where: { id: req.member!.userId },
+      select: { id: true, name: true, email: true, phone: true, role: true, tenantId: true },
+    });
+    if (!user) throw notFound('Профайл олдсонгүй');
+    res.json({ user });
+  }),
+);
+
+/** Dashboard: ажилтны гишүүнчлэл. Эрхгүй бол 403. */
+authRouter.get(
+  '/staff',
+  requireStaff,
+  asyncHandler(async (req, res) => {
+    const user = await prisma.user.findUnique({
+      where: { id: req.member!.userId },
+      select: { id: true, name: true, email: true, phone: true, role: true, tenantId: true },
+    });
+    if (!user) throw notFound('Хэрэглэгч олдсонгүй');
+    res.json({ user });
+  }),
+);
