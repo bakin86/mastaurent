@@ -1,16 +1,14 @@
 import { useEffect } from 'react';
-import { useAuth as useClerkAuth, useClerk } from '@clerk/react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { create } from 'zustand';
 import { ApiError, api, getLocalToken, refreshLocalToken, setLocalToken } from '../lib/api';
-import { clerkEnabled } from '../lib/clerk';
 import type { User } from '../lib/types';
 
 /**
  * Нэвтрэлт нь ПЛАТФОРМЫН хэмжээнд. Нэг удаа бүртгүүлээд бүх ресторанд хандана.
  * Ресторан бүр дэх профайл, эрх нь тухайн ресторанд анх хандахад үүснэ.
  *
- * Хоёр зам зэрэг ажиллана: и-мэйл + нууц үг (өөрийн JWT), эсвэл Clerk.
+ * Нэвтрэх зам НЭГ: Verify.MN утасны баталгаажуулалт → өөрийн JWT.
  */
 
 /** Платформын данс — ресторанаас хамааралгүй. */
@@ -25,19 +23,6 @@ export type Account = {
 
 export const isStaff = (user: User | null | undefined) =>
   !!user && ['DIRECTOR', 'MANAGER', 'KITCHEN', 'DRIVER'].includes(user.role);
-
-/**
- * Clerk тохируулаагүй үед түүний hook-ууд алдаа шиддэг (provider байхгүй).
- * `clerkEnabled` нь build-ийн үед тогтдог тул энд hook сонгох нь
- * дуудлагын дарааллыг өөрчлөхгүй — React-ийн дүрэм зөрчигдөхгүй.
- */
-const useSignedIn = clerkEnabled
-  ? useClerkAuth
-  : () => ({ isLoaded: true, isSignedIn: false }) as { isLoaded: boolean; isSignedIn: boolean };
-
-const useClerkSignOut = clerkEnabled
-  ? () => useClerk().signOut
-  : () => async (_opts?: { redirectUrl?: string }) => {};
 
 // --- Өөрийн нэвтрэлтийн сесс -------------------------------------------------
 
@@ -147,15 +132,14 @@ const settled = (q: { isFetched: boolean; isFetching: boolean }) => q.isFetched 
 
 /** Платформын сесс — нэвтэрсэн эсэх. Ресторан хамаарахгүй. */
 export function useAccount() {
-  const { isLoaded, isSignedIn: clerkSignedIn } = useSignedIn();
   const localToken = useLocalAuth((s) => s.token);
   const restored = useLocalAuth((s) => s.restored);
-  const signedIn = !!localToken || !!clerkSignedIn;
+  const signedIn = !!localToken;
 
   const query = useQuery({
-    queryKey: ['account', localToken ? 'local' : 'clerk'],
+    queryKey: ['account'],
     queryFn: () => api<{ user: Account }>('/auth/me'),
-    enabled: (isLoaded || !!localToken) && signedIn,
+    enabled: signedIn,
     retry: false,
     staleTime: 60_000,
   });
@@ -164,7 +148,9 @@ export function useAccount() {
 
   return {
     account: query.data?.user ?? null,
-    ready: (isLoaded || !!localToken) && restored && (!signedIn || settled(query)),
+    // `restored` дуустал шийдэхгүй — refresh cookie-гоор сесс сэргэж
+    // магадгүй. Тэгэхгүй бол хуудас сэргээхэд нэвтрэлт рүү шидэгдэнэ.
+    ready: restored && (!signedIn || settled(query)),
     isSignedIn: signedIn,
     error: query.error instanceof ApiError ? query.error : null,
   };
@@ -232,23 +218,16 @@ export function useStaffMember() {
 }
 
 
-/** Аль замаар нэвтэрсэн ч ажилладаг гарах үйлдэл. */
+/** Гарах — сервер дээр tokenVersion ахиж, хуучин токенууд хүчингүй болно. */
 export function useSignOut() {
-  const clerkSignOut = useClerkSignOut();
   const setToken = useLocalAuth((s) => s.setToken);
   const queryClient = useQueryClient();
 
   return async (opts?: { redirectUrl?: string }) => {
-    if (getLocalToken()) {
-      // Сервер дээр tokenVersion ахиж, хуучин токенууд хүчингүй болно.
-      await api('/auth/logout', { method: 'POST' }).catch(() => {});
-      setToken(null);
-      queryClient.clear();
-      if (opts?.redirectUrl) window.location.assign(opts.redirectUrl);
-      return;
-    }
+    await api('/auth/logout', { method: 'POST' }).catch(() => {});
+    setToken(null);
     queryClient.clear();
-    await clerkSignOut(opts);
+    if (opts?.redirectUrl) window.location.assign(opts.redirectUrl);
   };
 }
 

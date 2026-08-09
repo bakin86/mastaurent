@@ -2,7 +2,6 @@ import { Router } from 'express';
 import bcrypt from 'bcryptjs';
 import { z } from 'zod';
 import { prisma } from '../db.js';
-import { clerkConfigured } from '../env.js';
 import { asyncHandler, badRequest, notFound, unauthorized } from '../lib/http.js';
 import {
   REFRESH_COOKIE,
@@ -31,7 +30,7 @@ const publicAccount = {
   isPlatformAdmin: true,
 } as const;
 
-authRouter.get('/methods', (_req, res) => res.json({ password: true, clerk: clerkConfigured, verifyMn: true }));
+authRouter.get('/methods', (_req, res) => res.json({ password: true, verifyMn: true }));
 
 const phoneStartSchema = z.object({
   phone: z.string().min(8, 'Утасны дугаар багадаа 8 оронтой байна').max(12),
@@ -190,9 +189,9 @@ authRouter.post(
     const account = await prisma.account.findUnique({ where: { email: body.email } });
     if (!account) throw unauthorized('И-мэйл эсвэл нууц үг буруу');
 
-    // Clerk-ээр бүртгүүлсэн дансанд нууц үг байхгүй.
+    // Verify.MN утсаар үүссэн дансанд нууц үг байхгүй.
     if (!account.passwordHash) {
-      throw unauthorized('Энэ бүртгэл нууц үггүй. Google-ээр нэвтэрнэ үү.');
+      throw unauthorized('Энэ бүртгэл нууц үггүй. Утасны дугаараараа нэвтэрнэ үү.');
     }
     if (!(await bcrypt.compare(body.password, account.passwordHash))) {
       throw unauthorized('И-мэйл эсвэл нууц үг буруу');

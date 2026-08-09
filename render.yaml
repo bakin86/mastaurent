@@ -11,7 +11,7 @@ services:
     # `prisma` CLI (generate) хоёул devDependencies дотор байгаа.
     buildCommand: npm ci --include=dev && npx prisma generate --schema apps/api/prisma/schema.prisma && npm run build -w @hool/api
     startCommand: npm run start -w @hool/api
-    healthCheckPath: /api/payments/providers
+    healthCheckPath: /api/health
     envVars:
       - key: NODE_ENV
         value: production

@@ -13,7 +13,6 @@
     "dev:web": "npm run dev -w @hool/web",
     "build": "npm run build -w @hool/api && npm run build -w @hool/web",
     "test": "npm run test -w @hool/api",
-    "clerk:check": "npm run clerk:check -w @hool/api",
     "tunnel": "cloudflared tunnel --url http://localhost:4000 --no-autoupdate",
     "db:push": "npm run db:push -w @hool/api",
     "db:seed": "npm run db:seed -w @hool/api",

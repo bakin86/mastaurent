@@ -2,8 +2,7 @@ import express from 'express';
 import cors from 'cors';
 import helmet from 'helmet';
 import cookieParser from 'cookie-parser';
-import { clerkMiddleware } from '@clerk/express';
-import { SETUP_HINT, clerkConfigured, env } from './env.js';
+import { env } from './env.js';
 import { errorHandler } from './lib/http.js';
 import { apiLimiter } from './lib/rateLimit.js';
 import { authRouter } from './routes/auth.js';
@@ -42,10 +41,6 @@ app.use('/api/payments/stripe/webhook', express.raw({ type: 'application/json' }
 app.use(express.json({ limit: '1mb' }));
 app.use(cookieParser());
 
-// Clerk-ийн сессийг уншиж req дээр тавина. Эрх, tenant-ыг энэ ЗААХГҮЙ —
-// түүнийг middleware/auth.ts дэх гишүүнчлэл шийднэ.
-if (clerkConfigured) app.use(clerkMiddleware());
-
 app.get('/api/health', (_req, res) => res.json({ ok: true, ts: Date.now() }));
 
 app.use('/api', apiLimiter);
@@ -70,10 +65,6 @@ app.use(errorHandler);
 const server = app.listen(env.port, () => {
   console.log(`\n  Masteurent API  →  http://localhost:${env.port}/api`);
   console.log(`             Web  →  ${env.webOrigin}`);
-  if (!clerkConfigured) {
-    console.warn(`\n  ⚠  ${SETUP_HINT}`);
-    console.warn('     Нийтийн хэсэг ажиллана; нэвтрэлт шаардсан зам 503 буцаана.');
-  }
   console.log('');
 });
 startRealtime(server);

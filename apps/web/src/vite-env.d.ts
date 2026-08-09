@@ -1,7 +1,8 @@
 /// <reference types="vite/client" />
 
 interface ImportMetaEnv {
-  readonly VITE_CLERK_PUBLISHABLE_KEY: string;
+  /** API-гийн бүтэн хаяг. Хоосон бол `/api` (dev дээр vite proxy). */
+  readonly VITE_API_URL: string;
 }
 
 interface ImportMeta {

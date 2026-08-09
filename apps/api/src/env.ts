@@ -2,20 +2,7 @@ import 'dotenv/config';
 
 const isProd = process.env.NODE_ENV === 'production';
 
-const clerkPublishableKey = process.env.CLERK_PUBLISHABLE_KEY ?? '';
-const clerkSecretKey = process.env.CLERK_SECRET_KEY ?? '';
-
-/**
- * Clerk тохируулагдсан эсэх.
- *
- * Тохируулаагүй бол сервер асаад л байна — цэс, ресторан зэрэг нийтийн
- * хэсэг ажиллана. Зөвхөн нэвтрэлт шаардсан зам нь юу дутуугий нь хэлсэн
- * 503 буцаана. Ингэснээр тохиргооны алдаа бүх төслийг унагахгүй.
- */
-export const clerkConfigured = Boolean(clerkPublishableKey && clerkSecretKey);
-
-// --- Өөрийн нэвтрэлт (нууц үг + JWT) ----------------------------------------
-// Clerk-ээс хамааралгүй, үргэлж ажилладаг зам. Хоёулаа зэрэг идэвхтэй байна.
+// --- Нэвтрэлт (Verify.MN утас + JWT) ----------------------------------------
 
 function secret(key: string, devFallback: string): string {
   const value = process.env[key];
@@ -28,11 +15,6 @@ function secret(key: string, devFallback: string): string {
   if (isProd) throw new Error(`Орчны хувьсагч дутуу байна: ${key}`);
   return devFallback;
 }
-
-export const SETUP_HINT =
-  'Clerk тохируулаагүй байна. https://dashboard.clerk.com → API Keys хэсгээс ' +
-  'түлхүүрээ авч apps/api/.env (CLERK_PUBLISHABLE_KEY, CLERK_SECRET_KEY) ба ' +
-  'apps/web/.env (VITE_CLERK_PUBLISHABLE_KEY) файлд тавина уу.';
 
 // --- Төлбөр ------------------------------------------------------------------
 
@@ -68,8 +50,6 @@ export const env = {
   webOrigin: process.env.WEB_ORIGIN ?? 'http://localhost:5173',
   /** QPay callback болон Stripe redirect энэ хаяг руу буцна. */
   publicApiUrl: process.env.PUBLIC_API_URL ?? `http://localhost:${process.env.PORT ?? 4000}`,
-  clerkPublishableKey,
-  clerkSecretKey,
   accessSecret: secret('JWT_ACCESS_SECRET', 'dev-access-secret-solino'),
   refreshSecret: secret('JWT_REFRESH_SECRET', 'dev-refresh-secret-solino'),
   /** API болон web өөр домэйн дээр байвал 'none' (+ HTTPS) шаардлагатай. */
@@ -86,11 +66,3 @@ export const verifyMnConfigured = Boolean(env.verifyMnApiKey);
 
 
 
-/**
- * Clerk бол СОНГОЛТ — нэвтрэлтийн үндсэн зам нь Verify.MN утас + өөрийн JWT.
- *
- * Өмнө нь энд production дээр Clerk байхгүй бол шидэлт хийж, серверийг огт
- * асаахгүй байсан. Clerk-гүйгээр бүх урсгал ажилладаг болсон тул энэ нь
- * зөвхөн deploy-г унагаах үүрэгтэй үлдсэн. Одоо анхааруулаад өнгөрнө.
- */
-if (isProd && !clerkConfigured) console.warn(`[api] ${SETUP_HINT}`);

@@ -1,7 +1,5 @@
 import type { NextFunction, Request, Response } from 'express';
-import { clerkClient, getAuth } from '@clerk/express';
 import { prisma } from '../db.js';
-import { clerkConfigured } from '../env.js';
 import { asyncHandler, badRequest, forbidden, unauthorized } from '../lib/http.js';
 import { verifyAccess, type TokenPayload } from '../lib/jwt.js';
 
@@ -60,7 +58,8 @@ function localPayload(req: Request): TokenPayload | null {
   }
 }
 
-async function accountFromLocal(req: Request): Promise<Account | null> {
+/** Токеноос дансыг олно. Нэвтрэлтийн ганц зам. */
+async function resolveAccount(req: Request): Promise<Account | null> {
   const payload = localPayload(req);
   if (!payload) return null;
 
@@ -75,47 +74,6 @@ async function accountFromLocal(req: Request): Promise<Account | null> {
   return safe.isBlocked ? null : safe;
 }
 
-/** Clerk-ийн профайл. Зөвхөн шинэ данс үүсгэх/холбоход л дуудагдана. */
-async function clerkProfile(clerkUserId: string) {
-  const u = await clerkClient.users.getUser(clerkUserId);
-  const email =
-    u.emailAddresses.find((e) => e.id === u.primaryEmailAddressId)?.emailAddress ??
-    u.emailAddresses[0]?.emailAddress;
-  if (!email) throw badRequest('Clerk дээр и-мэйл хаяг олдсонгүй');
-
-  return {
-    email,
-    name: [u.firstName, u.lastName].filter(Boolean).join(' ') || email.split('@')[0],
-    phone: u.phoneNumbers.find((p) => p.id === u.primaryPhoneNumberId)?.phoneNumber ?? null,
-  };
-}
-
-async function accountFromClerk(req: Request): Promise<Account | null> {
-  if (!clerkConfigured) return null;
-  const { userId } = getAuth(req);
-  if (!userId) return null;
-
-  const found = await prisma.account.findUnique({
-    where: { clerkUserId: userId },
-    select: accountSelect,
-  });
-  if (found) return found.isBlocked ? null : found;
-
-  // Ижил и-мэйлтэй данс байвал холбоно — хоёр тусдаа данс үүсэхээс сэргийлнэ.
-  const profile = await clerkProfile(userId);
-  const linked = await prisma.account.upsert({
-    where: { email: profile.email },
-    update: { clerkUserId: userId },
-    create: { ...profile, clerkUserId: userId },
-    select: accountSelect,
-  });
-  return linked.isBlocked ? null : linked;
-}
-
-/** Аль ч замаар нэвтэрсэн дансыг олно. */
-async function resolveAccount(req: Request): Promise<Account | null> {
-  return (await accountFromLocal(req)) ?? (await accountFromClerk(req));
-}
 
 // --- Гишүүнчлэл --------------------------------------------------------------
 

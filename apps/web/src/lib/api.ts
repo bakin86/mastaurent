@@ -2,20 +2,7 @@ import { API_BASE as BASE } from './config';
 
 let activeTenantSlug: string | null = null;
 
-/**
- * Clerk-ийн токен авагч. `api()` нь hook биш тул Clerk-ийн контекстэд
- * хүрч чадахгүй — App доторх гүүр компонент үүнийг бүртгүүлнэ.
- */
-let tokenGetter: (() => Promise<string | null>) | null = null;
-
-export function setTokenGetter(fn: (() => Promise<string | null>) | null) {
-  tokenGetter = fn;
-}
-
-/**
- * Өөрийн нэвтрэлтийн access token. Clerk-ээс хамааралгүй, зэрэг ажиллана.
- * Байвал үүнийг эхэлж хэрэглэнэ; байхгүй бол Clerk-ийнхийг асууна.
- */
+/** Нэвтрэлтийн access token. Verify.MN-ээр нэвтрэхэд энд хадгалагдана. */
 const LOCAL_TOKEN_KEY = 'hool_at';
 let localToken: string | null = localStorage.getItem(LOCAL_TOKEN_KEY);
 
@@ -57,10 +44,8 @@ type Options = { method?: string; body?: unknown; tenant?: string; retry?: boole
 export async function api<T>(path: string, opts: Options = {}): Promise<T> {
   const headers: Record<string, string> = { 'Content-Type': 'application/json' };
 
-  // Өөрийн токен байвал тэрийг, үгүй бол Clerk-ийнхийг. Clerk нь хугацаа
-  // дуусахад өөрөө сэргээдэг; өөрийн токеныг доор 401 дээр сэргээнэ.
-  const token = localToken ?? (tokenGetter ? await tokenGetter().catch(() => null) : null);
-  if (token) headers.Authorization = `Bearer ${token}`;
+  // Токен 15 минут насалдаг — доор 401 дээр refresh cookie-гоор сэргээнэ.
+  if (localToken) headers.Authorization = `Bearer ${localToken}`;
 
   const tenant = opts.tenant ?? activeTenantSlug ?? tenantFromPath();
   if (tenant) headers['X-Tenant'] = tenant;
@@ -79,7 +64,7 @@ export async function api<T>(path: string, opts: Options = {}): Promise<T> {
   }
 
   // Өөрийн access token 15 минут насалдаг — 401 дээр нэг удаа сэргээж
-  // дахин оролдоно. Clerk-ийн токенд энэ хэрэггүй.
+  // дахин оролдоно.
   if (res.status === 401 && localToken && opts.retry !== false && !path.startsWith('/auth/refresh')) {
     if (await refreshLocalToken()) return api<T>(path, { ...opts, retry: false });
   }

@@ -1,9 +1,6 @@
 import { useEffect } from 'react';
 import { Navigate, Route, Routes, useLocation } from 'react-router-dom';
 import { AnimatePresence } from 'framer-motion';
-import { useAuth as useClerkAuth } from '@clerk/react';
-import { setTokenGetter } from './lib/api';
-import { clerkEnabled } from './lib/clerk';
 import { restoreLocalSession } from './store/auth';
 
 import { Landing } from './pages/Landing';
@@ -35,17 +32,6 @@ import { StaffManagement } from './pages/dashboard/Staff';
 import { DispatchDashboard } from './pages/dashboard/Dispatch';
 import { useStaffMember } from './store/auth';
 
-/**
- * `api()` нь hook биш тул Clerk-ийн контекстэд хүрч чадахгүй.
- * Токен авагчийг render-ийн үед бүртгүүлнэ — эффект дотор тавихад
- * хүүхэд компонентын эхний query токенгүй явах эрсдэлтэй.
- */
-function ClerkApiBridge() {
-  const { getToken } = useClerkAuth();
-  setTokenGetter(() => getToken());
-  return null;
-}
-
 export default function App() {
   const location = useLocation();
 
@@ -61,7 +47,6 @@ export default function App() {
 
   return (
     <>
-      {clerkEnabled && <ClerkApiBridge />}
       <AnimatePresence mode="wait">
         <Routes location={location} key={location.pathname}>
           <Route path="/" element={<Landing />} />

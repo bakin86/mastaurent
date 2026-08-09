@@ -160,9 +160,8 @@ enum Role {
 model Account {
   id           String   @id @default(cuid())
   email        String   @unique
-  // Нууц үгээр бүртгүүлээгүй (зөвхөн Clerk) бол хоосон.
+  // Verify.MN утсаар бүртгүүлсэн данс нууц үггүй.
   passwordHash String?
-  clerkUserId  String?  @unique
   name         String
   phone        String?
   // Гарах бүрд нэмэгдэнэ → хуучин refresh token-ууд хүчингүй болно.

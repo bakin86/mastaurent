@@ -638,7 +638,7 @@ async function main() {
   for (const t of tenants) console.log(`   ${t.name.padEnd(16)} эзэн: ${t.owner.email}`);
   console.log('   харилцагч: hereglegch@hool.mn (ресторан бүрт)');
   console.log('   платформын админ: admin@hool.mn');
-  console.log('\nМөн ижил и-мэйлээр Clerk-д бүртгүүлбэл эрх нь автоматаар холбогдоно.\n');
+  console.log('');
 }
 
 function pickSome<T>(arr: T[], n: number): T[] {
