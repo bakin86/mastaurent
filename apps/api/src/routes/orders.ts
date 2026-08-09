@@ -69,8 +69,9 @@ const createSchema = z.object({
   deliveryLat: z.number().min(-90).max(90).optional(),
   deliveryLng: z.number().min(-180).max(180).optional(),
   note: z.string().max(300).optional(),
-  // CASH — хүргэлтийн үед. QPAY/STRIPE — онлайнаар, төлбөр тусад нь үүснэ.
-  paymentMethod: z.enum(['CASH', 'QPAY', 'STRIPE']).default('CASH'),
+  // CASH — хүргэлтийн үед. QPAY/STRIPE/WIRE — онлайнаар, төлбөр тусад нь үүснэ.
+  paymentMethod: z.enum(['CASH', 'QPAY', 'STRIPE', 'WIRE']).default('CASH'),
+
   items: z
     .array(
       z.object({

@@ -13,7 +13,10 @@ import {
   orderRefOf,
   publicPayment,
   syncQpay,
+  syncWire,
+  syncStripe,
 } from '../payments/service.js';
+
 import { verifyWebhook } from '../payments/stripe.js';
 
 export const paymentsRouter = Router();
@@ -23,12 +26,11 @@ paymentsRouter.get('/providers', (_req, res) => res.json(availableProviders()));
 
 const createSchema = z.object({
   orderId: z.string().min(1, 'Захиалга заагаагүй байна'),
-  provider: z.enum(['QPAY', 'STRIPE']),
+  provider: z.enum(['QPAY', 'STRIPE', 'WIRE']),
 });
 
 /**
- * Төлбөр эхлүүлэх. Дүн нь захиалгаас уншигдана — биед дүн явуулах
- * боломжгүй бөгөөд явуулсан ч үл тоомсорлоно.
+ * Төлбөр эхлүүлэх. Дүн нь захиалгаас уншигдана.
  */
 paymentsRouter.post(
   '/create',
@@ -37,14 +39,13 @@ paymentsRouter.post(
   optionalMember,
   asyncHandler(async (req, res) => {
     const body = createSchema.parse(req.body);
-    const payment = await createPayment(body.orderId, req.tenantId!, body.provider);
+    const payment = await createPayment(body.orderId, req.tenantId!, body.provider as any);
     res.status(201).json({ payment: publicPayment(payment, await orderRefOf(payment.orderId)) });
   }),
 );
 
 /**
- * Төлбөрийн төлөв. QPay бол эх сурвалжаас нь дахин шалгана —
- * банкны апп дуусмагц энэ хүсэлт л үнэнийг хэлнэ.
+ * Төлбөрийн төлөв. QPay эсвэл Wire бол эх сурвалжаас нь дахин шалгана.
  */
 paymentsRouter.get(
   '/:id',
@@ -55,10 +56,19 @@ paymentsRouter.get(
     });
     if (!found) throw notFound('Төлбөр олдсонгүй');
 
-    const payment = found.provider === 'QPAY' ? await syncQpay(found) : found;
+    let payment = found;
+    if (found.provider === 'QPAY') {
+      payment = await syncQpay(found);
+    } else if (found.provider === ('WIRE' as any)) {
+      payment = await syncWire(found);
+    } else if (found.provider === 'STRIPE') {
+      payment = await syncStripe(found);
+    }
     res.json({ payment: publicPayment(payment, await orderRefOf(payment.orderId)) });
   }),
 );
+
+
 
 /**
  * QPay callback. Биед нь итгэхгүй — зөвхөн "шалгаарай" гэсэн дохио

@@ -6,6 +6,7 @@ import { ArrowUpRight } from 'lucide-react';
 import { api } from '../lib/api';
 import { mnt } from '../lib/format';
 import type { TenantCard } from '../lib/types';
+
 import {
   Counter,
   CurtainReveal,
@@ -18,8 +19,9 @@ import {
   useCursor,
 } from '../components/motion';
 import { SmartImage } from '../components/ui';
-import { useAccount } from '../store/auth';
+import { useAccount, useSignOut, useStaffMember } from '../store/auth';
 import { cn } from '../lib/cn';
+
 
 const HERO_IMAGE =
   'https://images.unsplash.com/photo-1414235077428-338989a2e8c0?auto=format&fit=crop&w=2000&q=80';
@@ -83,7 +85,13 @@ export function Landing() {
 function Header() {
   const { scrollY } = useScroll();
   const [solid, setSolid] = useState(false);
-  const { account, isSignedIn } = useAccount();
+  const signOut = useSignOut();
+
+  // Ажилтны эрхийг dashboard-тай ЯГ нэг эх сурвалжаас уншина. Тусдаа
+  // хүсэлт бичвэл хоёр газар зөрөх эрсдэлтэй — самбар нээгээд буцчихдаг.
+  const { user: staff, account, isSignedIn } = useStaffMember();
+
+  const hasSubscription = !!staff || !!account?.isPlatformAdmin;
 
   useEffect(() => scrollY.on('change', (v) => setSolid(v > 40)), [scrollY]);
 
@@ -109,7 +117,6 @@ function Header() {
           <a href="#platform" className="hidden text-[13px] text-muted transition-colors hover:text-ink sm:block">
             Платформ
           </a>
-          {/* Нэвтэрсэн эсэхээс хамаарч толгойн холбоос өөрчлөгдөнө. */}
           {isSignedIn && account?.isPlatformAdmin && (
             <Link
               to="/admin/requests"
@@ -127,18 +134,40 @@ function Header() {
             </Link>
           )}
 
-          <Link
-            to={isSignedIn ? '/dashboard/login' : '/login'}
-            className="group flex items-center gap-1.5 rounded-full border border-ink px-4 py-2 text-[12.5px] font-medium transition-colors hover:bg-ink hover:text-bg"
-          >
-            {isSignedIn ? 'Самбар' : 'Нэвтрэх'}
-            <ArrowUpRight size={13} className="transition-transform group-hover:translate-x-0.5 group-hover:-translate-y-0.5" />
-          </Link>
+          {!isSignedIn ? (
+            <Link
+              to="/login"
+              className="group flex items-center gap-1.5 rounded-full border border-ink px-4 py-2 text-[12.5px] font-medium transition-colors hover:bg-ink hover:text-bg"
+            >
+              Нэвтрэх
+              <ArrowUpRight size={13} className="transition-transform group-hover:translate-x-0.5 group-hover:-translate-y-0.5" />
+            </Link>
+          ) : (
+            <div className="flex items-center gap-4">
+              {hasSubscription && (
+                <Link
+                  to="/dashboard/login"
+                  className="group flex items-center gap-1.5 rounded-full border border-ink px-4 py-2 text-[12.5px] font-medium transition-colors hover:bg-ink hover:text-bg"
+                >
+                  Самбар
+                  <ArrowUpRight size={13} className="transition-transform group-hover:translate-x-0.5 group-hover:-translate-y-0.5" />
+                </Link>
+              )}
+              <button
+                onClick={() => void signOut({ redirectUrl: '/' })}
+                className="text-[12.5px] font-medium text-muted transition-colors hover:text-ink cursor-pointer"
+              >
+                Гарах
+              </button>
+            </div>
+          )}
         </nav>
       </div>
     </motion.header>
   );
 }
+
+
 
 // --- Hero ---------------------------------------------------------------------
 

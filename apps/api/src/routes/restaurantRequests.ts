@@ -1,17 +1,16 @@
 import { Router } from 'express';
 import { z } from 'zod';
 import { prisma } from '../db.js';
+import { env } from '../env.js';
 import { asyncHandler, badRequest, notFound } from '../lib/http.js';
 import { requireAccount, requirePlatformAdmin } from '../middleware/auth.js';
+import { createCheckoutSession, stripeClient } from '../payments/stripe.js';
+import { createWirePaymentIntent, getWirePaymentIntent } from '../payments/wire.js';
 
-/**
- * Ресторан нээх хүсэлтийн урсгал.
- *
- *   хэрэглэгч хүсэлт илгээнэ  →  платформын админ хянана
- *        →  зөвшөөрвөл: Tenant үүсч, хүсэлт гаргагч нь OWNER болно
- *        →  татгалзвал: шалтгаантайгаар буцна
- */
 export const requestsRouter = Router();
+
+
+
 
 const publicRequest = {
   id: true,
@@ -57,11 +56,11 @@ const createSchema = z.object({
   openTime: z.string().regex(/^\d{2}:\d{2}$/, 'Цаг HH:MM хэлбэртэй').default('09:00'),
   closeTime: z.string().regex(/^\d{2}:\d{2}$/, 'Цаг HH:MM хэлбэртэй').default('22:00'),
   logoUrl: z.string().max(600).optional().or(z.literal('')),
-  coverUrl: z.string().max(600).optional().or(z.literal('')),
   accentColor: z
     .string()
     .regex(/^#[0-9a-fA-F]{6}$/, 'Өнгө #RRGGBB хэлбэртэй байна')
     .default('#0A0A0A'),
+  plan: z.enum(['BASIC', 'PREMIUM', 'FRANCHISE']).default('BASIC'),
   note: z.string().max(600).optional(),
 });
 
@@ -77,9 +76,70 @@ async function assertSlugFree(slug: string, exceptRequestId?: string) {
   if (pending) throw badRequest('Энэ хаягаар хүсэлт аль хэдийн илгээгдсэн байна');
 }
 
+async function approveRequestAndCreateTenant(request: {
+  id: string;
+  slug: string;
+  name: string;
+  category: string | null;
+  tagline: string | null;
+  description: string | null;
+  phone: string | null;
+  address: string | null;
+  openTime: string;
+  closeTime: string;
+  logoUrl: string | null;
+  coverUrl: string | null;
+  accentColor: string;
+  plan: any;
+  monthlyFee: number;
+  accountId: string;
+  account: { name: string; email: string; phone: string | null };
+}) {
+  await assertSlugFree(request.slug, request.id);
+  return prisma.$transaction(async (tx) => {
+    const tenant = await tx.tenant.create({
+      data: {
+        slug: request.slug,
+        name: request.name,
+        category: request.category,
+        tagline: request.tagline,
+        description: request.description,
+        phone: request.phone,
+        address: request.address,
+        openTime: request.openTime,
+        closeTime: request.closeTime,
+        logoUrl: request.logoUrl,
+        coverUrl: request.coverUrl,
+        accentColor: request.accentColor,
+        plan: request.plan,
+        monthlyFee: request.monthlyFee,
+        subscriptionExpiresAt: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
+      },
+    });
+
+    await tx.user.create({
+      data: {
+        tenantId: tenant.id,
+        accountId: request.accountId,
+        name: request.account.name,
+        email: request.account.email,
+        phone: request.account.phone,
+        role: 'DIRECTOR',
+      },
+    });
+
+    await tx.restaurantRequest.update({
+      where: { id: request.id },
+      data: { status: 'APPROVED', tenantId: tenant.id, reviewedAt: new Date() },
+    });
+
+    return tenant;
+  });
+}
+
 // --- Хэрэглэгчийн тал ---------------------------------------------------------
 
-/** Ресторан шууд үүсгэх. Request мөр нь audit түүх болж APPROVED төлөвтэй хадгалагдана. */
+/** Ресторан хүсэлт үүсгэж, Wire төлбөрийн нэхэмжлэх бэлтгэнэ. */
 requestsRouter.post(
   '/',
   requireAccount,
@@ -95,33 +155,42 @@ requestsRouter.post(
 
     await assertSlugFree(body.slug);
 
-    const result = await prisma.$transaction(async (tx) => {
-      const tenant = await tx.tenant.create({
-        data: {
-          slug: body.slug, name: body.name, category: body.category,
-          tagline: body.tagline, description: body.description, phone: body.phone,
-          address: body.address, openTime: body.openTime, closeTime: body.closeTime,
-          logoUrl: body.logoUrl, coverUrl: body.coverUrl, accentColor: body.accentColor,
-        },
+    const fee = body.plan === 'FRANCHISE' ? 350000 : body.plan === 'PREMIUM' ? 150000 : 50000;
+
+    let checkoutUrl: string | null = null;
+    let sessionId: string | null = null;
+
+    try {
+      const back = `${env.webOrigin}/restaurant-request`;
+      const session = await createCheckoutSession({
+        paymentId: `sub_${Date.now()}`,
+        amount: fee,
+        description: `Masteurent Сүбскрипшн (${body.plan}) - ${body.name}`,
+        successUrl: `${back}?success=1`,
+        cancelUrl: `${back}?cancelled=1`,
       });
-      await tx.user.create({
-        data: {
-          tenantId: tenant.id, accountId, name: req.account!.name,
-          email: req.account!.email, phone: req.account!.phone, role: 'DIRECTOR',
-        },
-      });
-      const request = await tx.restaurantRequest.create({
-        data: {
-          ...body, accountId, status: 'APPROVED', tenantId: tenant.id,
-          reviewedAt: new Date(), reviewNote: 'Автоматаар үүссэн',
-        },
-        select: publicRequest,
-      });
-      return { tenant, request };
+      sessionId = session.id;
+      checkoutUrl = session.url ?? null;
+    } catch (e) {
+      console.error('Stripe subscription session creation failed:', e);
+    }
+
+    const request = await prisma.restaurantRequest.create({
+      data: {
+        ...body,
+        monthlyFee: fee,
+        accountId,
+        status: 'PENDING',
+        note: sessionId ? `STRIPE:${sessionId}|${checkoutUrl}` : body.note,
+      },
+      select: publicRequest,
     });
-    res.status(201).json({ request: result.request, tenant: { id: result.tenant.id, slug: result.tenant.slug, name: result.tenant.name } });
+
+    res.status(201).json({ request, checkoutUrl });
   }),
 );
+
+
 
 /** Өөрийн хүсэлтүүд. */
 requestsRouter.get(
@@ -173,50 +242,60 @@ requestsRouter.post(
     if (!request) throw notFound('Хүсэлт олдсонгүй');
     if (request.status !== 'PENDING') throw badRequest('Энэ хүсэлт аль хэдийн хянагдсан байна');
 
-    // Хүсэлт илгээснээс хойш хаяг эзэлэгдсэн байж болно.
-    await assertSlugFree(request.slug, request.id);
-
-    const tenant = await prisma.$transaction(async (tx) => {
-      const created = await tx.tenant.create({
-        data: {
-          slug: request.slug,
-          name: request.name,
-          category: request.category,
-          tagline: request.tagline,
-          description: request.description,
-          phone: request.phone,
-          address: request.address,
-          openTime: request.openTime,
-          closeTime: request.closeTime,
-          logoUrl: request.logoUrl,
-          coverUrl: request.coverUrl,
-          accentColor: request.accentColor,
-        },
-      });
-
-      // Хүсэлт гаргагч нь шинэ рестораны эзэн болно.
-      await tx.user.create({
-        data: {
-          tenantId: created.id,
-          accountId: request.accountId,
-          name: request.account.name,
-          email: request.account.email,
-          phone: request.account.phone,
-          role: 'DIRECTOR',
-        },
-      });
-
-      await tx.restaurantRequest.update({
-        where: { id: request.id },
-        data: { status: 'APPROVED', tenantId: created.id, reviewedAt: new Date() },
-      });
-
-      return created;
-    });
-
+    const tenant = await approveRequestAndCreateTenant(request);
     res.json({ tenant: { id: tenant.id, slug: tenant.slug, name: tenant.name } });
   }),
 );
+
+/** Wire Төлбөр шалгах & Идэвхжүүлэх */
+requestsRouter.post(
+  '/:id/verify-payment',
+  requireAccount,
+  asyncHandler(async (req, res) => {
+    const request = await prisma.restaurantRequest.findFirst({
+      where: { id: req.params.id, accountId: req.account!.id },
+      include: { account: { select: { id: true, name: true, email: true, phone: true } } },
+    });
+    if (!request) throw notFound('Хүсэлт олдсонгүй');
+
+    if (request.status === 'APPROVED' && request.tenantId) {
+      const tenant = await prisma.tenant.findUnique({ where: { id: request.tenantId } });
+      return res.json({ status: 'APPROVED', tenant });
+    }
+
+    if (request.note?.startsWith('STRIPE:')) {
+      const parts = request.note.split('|');
+      const sessionId = parts[0].replace('STRIPE:', '');
+      try {
+        const session = await stripeClient().checkout.sessions.retrieve(sessionId);
+        if (session.payment_status === 'paid') {
+          const tenant = await approveRequestAndCreateTenant(request);
+          return res.json({ status: 'APPROVED', tenant });
+        }
+      } catch (e) {
+        console.error('Stripe payment verify error:', e);
+      }
+    }
+
+    if (request.note?.startsWith('WIRE:')) {
+      const parts = request.note.split('|');
+      const intentId = parts[0].replace('WIRE:', '');
+      try {
+        const intent = await getWirePaymentIntent(intentId);
+        if (intent.status === 'succeeded') {
+          const tenant = await approveRequestAndCreateTenant(request);
+          return res.json({ status: 'APPROVED', tenant });
+        }
+      } catch (e) {
+        console.error('Wire payment check error:', e);
+      }
+    }
+
+
+    res.json({ status: request.status, message: 'Төлбөр хараахан баталгаажаагүй байна' });
+  }),
+);
+
 
 const rejectSchema = z.object({
   reviewNote: z.string().min(3, 'Шалтгаанаа бичнэ үү').max(600),

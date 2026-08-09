@@ -9,7 +9,7 @@ import { CapsuleNav } from '../components/CapsuleNav';
 import { Skeleton } from '../components/ui';
 
 export function DashboardLayout({ roles, base = '/dashboard' }: { roles?: Role[]; base?: string }) {
-  const { user, ready } = useStaffMember();
+  const { user, isSignedIn, ready } = useStaffMember();
   const signOut = useSignOut();
 
   const { data } = useQuery({
@@ -41,8 +41,11 @@ export function DashboardLayout({ roles, base = '/dashboard' }: { roles?: Role[]
     );
   }
 
-  if (!user || !isStaff(user)) return <Navigate to="/dashboard/login" replace />;
+  if (!isSignedIn) return <Navigate to="/login" replace />;
+  if (!user) return <Navigate to="/restaurant-request" replace />;
+  if (!isStaff(user) && !user.isPlatformAdmin) return <Navigate to="/restaurant-request" replace />;
   if (roles && !roles.includes(user.role)) return <Navigate to={homeFor(user.role)} replace />;
+
 
   const items = user.role === 'KITCHEN'
     ? [{ to: `${base}/orders`, label: 'Гал тогоо', icon: ClipboardList }]

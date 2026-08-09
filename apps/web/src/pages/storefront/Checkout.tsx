@@ -1,14 +1,17 @@
 import { useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
-import { useMutation, useQuery } from '@tanstack/react-query';
+import { useMutation } from '@tanstack/react-query';
+
+
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
-import { ArrowLeft, CreditCard, QrCode, ShoppingBag, Store, Truck, Wallet } from 'lucide-react';
+import { ArrowLeft, CreditCard, ShoppingBag, Store, Truck, Wallet } from 'lucide-react';
 import { toast } from 'sonner';
 import { api, ApiError } from '../../lib/api';
 import { DISTRICTS, mnt } from '../../lib/format';
-import type { Order, Payment, PaymentProviders } from '../../lib/types';
+import type { Order, Payment } from '../../lib/types';
+
 import { cartTotals, lineTotal, useCart, useCartLines } from '../../store/cart';
 import { useMember } from '../../store/auth';
 import { useTenant } from '../../layouts/StorefrontLayout';
@@ -48,7 +51,9 @@ export function Checkout() {
   const lines = useCartLines(slug);
   const clear = useCart((s) => s.clear);
   const { subtotal, count } = cartTotals(lines);
-  const [method, setMethod] = useState<'CASH' | 'QPAY' | 'STRIPE'>('CASH');
+  const [method, setMethod] = useState<'CASH' | 'QPAY' | 'STRIPE' | 'WIRE'>('STRIPE');
+
+
   const [point, setPoint] = useState<{ latitude: number; longitude: number } | null>(null);
 
   // Ресторан хүргэлт хийдэггүй бол шууд очиж авах горимд эхэлнэ.
@@ -58,12 +63,6 @@ export function Checkout() {
   const bothAvailable = tenant.deliveryEnabled && tenant.pickupEnabled;
   const deliveryFee = type === 'DELIVERY' ? tenant.deliveryFee : 0;
 
-  // Аль төлбөрийн хэрэгсэл идэвхтэйг сервер шийднэ.
-  const { data: providers } = useQuery({
-    queryKey: ['payment-providers'],
-    queryFn: () => api<PaymentProviders>('/payments/providers'),
-    staleTime: Infinity,
-  });
 
   const {
     register,
@@ -248,35 +247,23 @@ export function Checkout() {
           <h2 className="text-[16px] font-semibold">Төлбөрийн хэлбэр</h2>
           <div className="grid gap-3 sm:grid-cols-2">
             <PayOption
+              active={method === 'STRIPE'}
+              onClick={() => setMethod('STRIPE')}
+              icon={<CreditCard size={17} />}
+              title="Stripe Онлайн Төлбөр"
+              subtitle="Visa · Mastercard · Карт"
+            />
+            <PayOption
               active={method === 'CASH'}
               onClick={() => setMethod('CASH')}
               icon={<Wallet size={17} />}
               title="Бэлнээр"
               subtitle={type === 'PICKUP' ? 'Авахдаа төлнө' : 'Хүргэлтийн үед төлнө'}
             />
-            <PayOption
-              active={method === 'QPAY'}
-              onClick={() =>
-                providers?.qpay
-                  ? setMethod('QPAY')
-                  : toast('QPay тохируулаагүй байна')
-              }
-              icon={<QrCode size={17} />}
-              title="QPay"
-              subtitle={providers?.qpay ? 'Банкны аппаар QR уншуулна' : 'Тохируулаагүй'}
-              disabled={!providers?.qpay}
-            />
-            {providers?.stripe && (
-              <PayOption
-                active={method === 'STRIPE'}
-                onClick={() => setMethod('STRIPE')}
-                icon={<CreditCard size={17} />}
-                title="Картаар"
-                subtitle="Visa · Mastercard"
-              />
-            )}
           </div>
+
         </section>
+
 
         {/* Захиалгын хураангуй */}
         <Card className="p-5">

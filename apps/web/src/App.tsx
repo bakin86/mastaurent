@@ -131,9 +131,23 @@ export default function App() {
 }
 
 function DashboardHome() {
-  const { user, ready } = useStaffMember();
+  const { user, isSignedIn, ready } = useStaffMember();
   if (!ready) return null;
-  if (!user) return <Navigate to="/dashboard/login" replace />;
-  const path = user.role === 'DIRECTOR' ? '/director/orders' : user.role === 'MANAGER' ? '/manager/orders' : user.role === 'KITCHEN' ? '/kitchen/orders' : user.role === 'DRIVER' ? '/driver/deliveries' : '/';
+  // Нэвтрээгүй бол л нэвтрэлт рүү. Нэвтэрсэн ч ажилтны эрхгүй хүнийг
+  // нэвтрэлт рүү шидвэл давталт үүснэ — тэр хүн ресторан нээх ёстой.
+  if (!isSignedIn) return <Navigate to="/login" replace />;
+  if (!user) return <Navigate to="/restaurant-request" replace />;
+  if (user.isPlatformAdmin) return <Navigate to="/admin/requests" replace />;
+  const path =
+    user.role === 'DIRECTOR'
+      ? '/director/orders'
+      : user.role === 'MANAGER'
+      ? '/manager/orders'
+      : user.role === 'KITCHEN'
+      ? '/kitchen/orders'
+      : user.role === 'DRIVER'
+      ? '/driver/deliveries'
+      : '/restaurant-request';
   return <Navigate to={path} replace />;
 }
+

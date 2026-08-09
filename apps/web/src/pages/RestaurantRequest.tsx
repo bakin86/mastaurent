@@ -1,4 +1,6 @@
-import { Link, useNavigate } from 'react-router-dom';
+import { useEffect } from 'react';
+import { Link, useNavigate, useSearchParams } from 'react-router-dom';
+
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
@@ -32,7 +34,9 @@ const schema = z.object({
   closeTime: z.string().regex(/^\d{2}:\d{2}$/, 'Цаг HH:MM хэлбэртэй'),
   logoUrl: z.string().max(600).optional().or(z.literal('')),
   note: z.string().max(600).optional(),
+  plan: z.enum(['BASIC', 'PREMIUM', 'FRANCHISE']).default('BASIC'),
 });
+
 
 /** Түгээмэл ангиллууд — сонгоход хялбар. */
 const CATEGORIES = [
@@ -63,25 +67,35 @@ export function RestaurantRequestPage() {
     register,
     handleSubmit,
     setValue,
+    watch,
     formState: { errors },
   } = useForm<Values>({
     resolver: zodResolver(schema),
-    defaultValues: { openTime: '09:00', closeTime: '22:00' },
+    defaultValues: { openTime: '09:00', closeTime: '22:00', plan: 'BASIC' },
   });
+
+  const selectedPlan = watch('plan');
+
 
   const mutation = useMutation({
     mutationFn: (values: Values) =>
-      api<{ request: Request; tenant: { slug: string } }>('/restaurant-requests', { method: 'POST', body: values }),
-    onSuccess: ({ tenant }) => {
-      toast.success('Ресторан амжилттай үүслээ');
+      api<{ request: Request; checkoutUrl?: string | null }>('/restaurant-requests', { method: 'POST', body: values }),
+    onSuccess: ({ checkoutUrl }) => {
       void queryClient.invalidateQueries({ queryKey: ['my-requests'] });
-      void queryClient.invalidateQueries({ queryKey: ['staff-me'] });
-      void queryClient.invalidateQueries({ queryKey: ['tenants'] });
-      navigate(`/t/${tenant.slug}`);
+      if (checkoutUrl) {
+        toast.success('Stripe Сүбскрипшн нэхэмжлэх үүслээ. Төлбөрийн хуудас руу шилжиж байна...');
+
+        setTimeout(() => {
+          window.location.href = checkoutUrl;
+        }, 1200);
+      } else {
+        toast.success('Рестораны хүсэлт илгээгдлээ.');
+      }
     },
     onError: (e: unknown) =>
       toast.error(e instanceof ApiError ? e.message : 'Ресторан үүсгэхэд алдаа гарлаа'),
   });
+
 
   if (ready && !isSignedIn) {
     return (
@@ -100,10 +114,28 @@ export function RestaurantRequestPage() {
     );
   }
 
+  const [params] = useSearchParams();
   const requests = data?.requests ?? [];
   const pending = requests.find((r) => r.status === 'PENDING');
 
+  useEffect(() => {
+    if (!pending || !params.get('success')) return;
+    api<{ status: string; tenant?: { slug: string } }>(`/restaurant-requests/${pending.id}/verify-payment`, {
+      method: 'POST',
+    })
+      .then((res) => {
+        if (res.status === 'APPROVED' && res.tenant) {
+          toast.success('Сүбскрипшн төлбөр баталгаажлаа! Ресторан идэвхжлээ');
+          void queryClient.invalidateQueries({ queryKey: ['my-requests'] });
+          void queryClient.invalidateQueries({ queryKey: ['auth', 'staff'] });
+          navigate('/dashboard/orders', { replace: true });
+        }
+      })
+      .catch(() => {});
+  }, [pending, params, navigate, queryClient]);
+
   return (
+
     <Shell>
       {isLoading ? (
         <Skeleton className="h-32" />
@@ -201,9 +233,76 @@ export function RestaurantRequestPage() {
                 <Textarea placeholder="Рестораны тухай товч танилцуулга..." {...register('note')} />
               </Field>
 
+              {/* Сүбскрипшн Багц Сонгох */}
+              <div className="space-y-3 pt-2">
+                <p className="text-[14px] font-semibold text-ink">Сүбскрипшн Багц Сонгох</p>
+                <div className="grid gap-3 sm:grid-cols-3">
+                  <label
+                    className={`cursor-pointer rounded-xl border p-4 transition-all ${
+                      selectedPlan === 'BASIC'
+                        ? 'border-primary bg-primary/5 ring-2 ring-primary/20'
+                        : 'border-line hover:border-muted'
+                    }`}
+                  >
+                    <div className="flex items-center justify-between">
+                      <span className="font-bold text-ink">Basic</span>
+                      <input type="radio" value="BASIC" {...register('plan')} className="accent-primary" />
+                    </div>
+                    <p className="mt-1 font-mono text-base font-semibold text-primary">50,000₮ / сар</p>
+                    <ul className="mt-3 space-y-1 text-xs text-muted">
+                      <li>✓ Цэсний лимит 20</li>
+                      <li>✓ Үндсэн захиалга</li>
+                      <li>✓ QPay / Wire төлбөр</li>
+                    </ul>
+                  </label>
+
+                  <label
+                    className={`cursor-pointer rounded-xl border p-4 transition-all ${
+                      selectedPlan === 'PREMIUM'
+                        ? 'border-primary bg-primary/5 ring-2 ring-primary/20'
+                        : 'border-line hover:border-muted'
+                    }`}
+                  >
+                    <div className="flex items-center justify-between">
+                      <span className="font-bold text-ink">Premium</span>
+                      <input type="radio" value="PREMIUM" {...register('plan')} className="accent-primary" />
+                    </div>
+                    <p className="mt-1 font-mono text-base font-semibold text-primary">150,000₮ / сар</p>
+                    <ul className="mt-3 space-y-1 text-xs text-muted">
+                      <li>✓ Хязгааргүй цэс</li>
+                      <li>✓ Ширээ захиалга</li>
+                      <li>✓ Live Map Tracking</li>
+                      <li>✓ Брэнд тохиргоо</li>
+                    </ul>
+                  </label>
+
+                  <label
+                    className={`cursor-pointer rounded-xl border p-4 transition-all ${
+                      selectedPlan === 'FRANCHISE'
+                        ? 'border-primary bg-primary/5 ring-2 ring-primary/20'
+                        : 'border-line hover:border-muted'
+                    }`}
+                  >
+                    <div className="flex items-center justify-between">
+                      <span className="font-bold text-ink">Franchise (France)</span>
+                      <input type="radio" value="FRANCHISE" {...register('plan')} className="accent-primary" />
+                    </div>
+                    <p className="mt-1 font-mono text-base font-semibold text-primary">350,000₮ / сар</p>
+                    <ul className="mt-3 space-y-1 text-xs text-muted">
+                      <li>✓ Сүлжээ олон салбар</li>
+                      <li>✓ Франчайз нэгдсэн тайлан</li>
+                      <li>✓ Тусгай домен & VIP API</li>
+                    </ul>
+                  </label>
+                </div>
+              </div>
+
+
               <Button type="submit" full size="lg" loading={mutation.isPending}>
-                Ресторан үүсгэх
+                Сүбскрипшн Төлж Ресторан Үүсгэх (Stripe)
               </Button>
+
+
 
               <p className="text-center text-[12.5px] text-faint">
                 {account?.email} нэрийн өмнөөс илгээгдэнэ
@@ -223,8 +322,33 @@ const STATUS = {
 } as const;
 
 function RequestCard({ request }: { request: Request }) {
+  const navigate = useNavigate();
+  const queryClient = useQueryClient();
   const s = STATUS[request.status];
   const Icon = s.icon;
+
+  const verifyMutation = useMutation({
+    mutationFn: () =>
+      api<{ status: string; tenant?: { slug: string } }>(`/restaurant-requests/${request.id}/verify-payment`, {
+        method: 'POST',
+      }),
+    onSuccess: (data) => {
+      if (data.status === 'APPROVED' && data.tenant) {
+        toast.success('Төлбөр баталгаажлаа! Ресторан идэвхжлээ');
+        void queryClient.invalidateQueries({ queryKey: ['my-requests'] });
+        void queryClient.invalidateQueries({ queryKey: ['auth', 'staff'] });
+        navigate(`/dashboard/orders`);
+      } else {
+        toast('Төлбөр хүлээгдэж байна. Wire дээр төлбөрөө хийсний дараа дахин шалгана уу.');
+      }
+    },
+    onError: (e: unknown) =>
+      toast.error(e instanceof ApiError ? e.message : 'Шалгахад алдаа гарлаа'),
+  });
+
+  const checkoutUrl = request.note?.includes('http')
+    ? request.note.split('|')[1]
+    : null;
 
   return (
     <Card className="p-5">
@@ -245,6 +369,30 @@ function RequestCard({ request }: { request: Request }) {
         </p>
       )}
 
+      {request.status === 'PENDING' && (
+        <div className="mt-4 flex flex-wrap items-center gap-2 border-t border-line pt-3">
+          {checkoutUrl && (
+            <a
+              href={checkoutUrl}
+              target="_blank"
+              rel="noreferrer"
+              className="inline-flex items-center gap-1.5 rounded-full bg-ink px-4 py-2 text-[12.5px] font-medium text-white"
+            >
+              Сүбскрипшн Төлбөр Төлөх (Stripe)
+            </a>
+          )}
+          <Button
+            variant="secondary"
+            size="sm"
+            loading={verifyMutation.isPending}
+            onClick={() => verifyMutation.mutate()}
+          >
+            Төлбөр Баталгаажуулах
+          </Button>
+        </div>
+      )}
+
+
       {request.status === 'APPROVED' && (
         <Link
           to="/dashboard/orders"
@@ -256,6 +404,7 @@ function RequestCard({ request }: { request: Request }) {
     </Card>
   );
 }
+
 
 function Shell({ children }: { children: React.ReactNode }) {
   return (

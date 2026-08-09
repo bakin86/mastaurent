@@ -1,9 +1,10 @@
 import type { Payment, PaymentProvider } from '@prisma/client';
 import { prisma } from '../db.js';
-import { PAYMENT_SETUP_HINT, env, qpayConfigured, stripeConfigured } from '../env.js';
+import { PAYMENT_SETUP_HINT, env, qpayConfigured, stripeConfigured, wireConfigured } from '../env.js';
 import { HttpError, badRequest, notFound } from '../lib/http.js';
 import * as qpay from './qpay.js';
 import * as stripe from './stripe.js';
+import * as wire from './wire.js';
 
 /** Клиент рүү буцаах хэлбэр — дотоод талбаруудыг задлахгүй. */
 export function publicPayment(p: Payment, order?: { orderNo: number; trackToken: string } | null) {
@@ -18,13 +19,11 @@ export function publicPayment(p: Payment, order?: { orderNo: number; trackToken:
     qrText: p.qrText,
     qrImage: p.qrImage,
     paidAt: p.paidAt,
-    // Зочин хэрэглэгч төлсний дараа захиалгаа хянах холбоос — нэвтрэлт шаардахгүй.
     orderNo: order?.orderNo ?? null,
     trackToken: order?.trackToken ?? null,
   };
 }
 
-/** Хянах холбоос гаргахад хэрэгтэй захиалгын талбарууд. */
 export function orderRefOf(orderId: string) {
   return prisma.order.findUnique({
     where: { id: orderId },
@@ -35,18 +34,10 @@ export function orderRefOf(orderId: string) {
 export function assertProviderReady(provider: PaymentProvider) {
   if (provider === 'QPAY' && !qpayConfigured) throw new HttpError(503, PAYMENT_SETUP_HINT);
   if (provider === 'STRIPE' && !stripeConfigured) throw new HttpError(503, PAYMENT_SETUP_HINT);
+  if (provider === (('WIRE' as unknown) as PaymentProvider) && !wireConfigured) throw new HttpError(503, PAYMENT_SETUP_HINT);
 }
 
-/**
- * Захиалгад төлбөр үүсгэнэ.
- *
- * Дүнг ЗӨВХӨН захиалгаас уншина — клиентээс ирсэн ямар ч дүнд итгэхгүй.
- * Нэг захиалгад хүлээгдэж буй төлбөр аль хэдийн байвал түүнийг дахин
- * ашиглана (хэрэглэгч товчоо дахин дарахад шинэ нэхэмжлэх үүсгэхгүй).
- */
 export async function createPayment(orderId: string, tenantId: string, provider: PaymentProvider) {
-  // Захиалга энэ ресторных мөн эсэхийг ЭХЛЭЭД шалгана — тохиргооны
-  // төлөв ямар ч байсан өөр tenant-ийн захиалга руу хандах боломжгүй.
   const order = await prisma.order.findFirst({
     where: { id: orderId, tenantId },
     select: {
@@ -81,11 +72,14 @@ export async function createPayment(orderId: string, tenantId: string, provider:
   });
 
   try {
-    return provider === 'QPAY'
-      ? await startQpay(payment, order.orderNo, order.customerPhone)
-      : await startStripe(payment, order.orderNo, order.tenant.slug);
+    if (provider === 'QPAY') {
+      return await startQpay(payment, order.orderNo, order.customerPhone);
+    } else if (provider === ('WIRE' as any)) {
+      return await startWire(payment, order.orderNo);
+    } else {
+      return await startStripe(payment, order.orderNo, order.tenant.slug);
+    }
   } catch (e) {
-    // Provider дуудлага унасан бол мөрийг тэнэгээр PENDING-д үлдээхгүй.
     await prisma.payment.update({ where: { id: payment.id }, data: { status: 'FAILED' } });
     throw e;
   }
@@ -111,6 +105,22 @@ async function startQpay(payment: Payment, orderNo: number, phone: string) {
   });
 }
 
+async function startWire(payment: Payment, orderNo: number) {
+  const intent = await wire.createWirePaymentIntent(
+    payment.id,
+    payment.amount,
+    `Masteurent Захиалга #${orderNo}`,
+  );
+
+  return prisma.payment.update({
+    where: { id: payment.id },
+    data: {
+      invoiceId: intent.id,
+      paymentUrl: `https://checkout.wire.mn/pay/${intent.client_secret}`,
+    },
+  });
+}
+
 async function startStripe(payment: Payment, orderNo: number, slug: string) {
   const back = `${env.webOrigin}/t/${slug}/pay/${payment.id}`;
   const session = await stripe.createCheckoutSession({
@@ -127,16 +137,14 @@ async function startStripe(payment: Payment, orderNo: number, slug: string) {
   });
 }
 
-/**
- * Төлбөрийг төлөгдсөнд тооцно. Идемпотент — webhook болон polling
- * зэрэг ирсэн ч захиалга нэг л удаа төлөгдсөн болно.
- */
+import { emitOrder, emitTenant } from '../realtime.js';
+
 export async function markPaid(paymentId: string, transactionId: string | null) {
   const payment = await prisma.payment.findUnique({ where: { id: paymentId } });
   if (!payment) throw notFound('Төлбөр олдсонгүй');
   if (payment.status === 'PAID') return payment;
 
-  return prisma.$transaction(async (tx) => {
+  const result = await prisma.$transaction(async (tx) => {
     const claimed = await tx.payment.updateMany({
       where: { id: paymentId, status: 'PENDING' },
       data: { status: 'PAID', transactionId, paidAt: new Date() },
@@ -145,26 +153,56 @@ export async function markPaid(paymentId: string, transactionId: string | null) 
     await tx.order.update({ where: { id: payment.orderId }, data: { isPaid: true } });
     return tx.payment.findUniqueOrThrow({ where: { id: paymentId } });
   });
+
+  emitTenant(payment.tenantId, 'payment:paid', { paymentId: payment.id, orderId: payment.orderId, amount: payment.amount });
+  emitOrder(payment.orderId, 'order:paid', { isPaid: true });
+
+  return result;
 }
 
-/**
- * QPay-гийн төлөвийг эх сурвалжаас нь шалгана.
- * Хэрэглэгчийн браузераас ирсэн мэдээлэлд огт найдахгүй.
- */
+
 export async function syncQpay(payment: Payment): Promise<Payment> {
   if (payment.status === 'PAID' || !payment.invoiceId) return payment;
 
   const result = await qpay.checkPayment(payment.invoiceId);
   const paidRow = result.rows?.find((r) => r.payment_status?.toUpperCase() === 'PAID');
 
-  // Дүн дутуу төлөгдсөн бол төлөгдсөнд тооцохгүй.
   if (!paidRow || (result.paid_amount ?? 0) < payment.amount) return payment;
 
   return markPaid(payment.id, paidRow.payment_id ?? null);
 }
 
-/** Аль provider бэлэн байгааг клиентэд мэдэгдэнэ. */
+export async function syncWire(payment: Payment): Promise<Payment> {
+  if (payment.status === 'PAID' || !payment.invoiceId) return payment;
+
+  const intent = await wire.getWirePaymentIntent(payment.invoiceId);
+  if (intent.status === 'succeeded') {
+    return markPaid(payment.id, intent.id);
+  }
+
+  return payment;
+}
+
+export async function syncStripe(payment: Payment): Promise<Payment> {
+  if (payment.status === 'PAID' || !payment.invoiceId) return payment;
+
+  try {
+    const session = await stripe.stripeClient().checkout.sessions.retrieve(payment.invoiceId);
+    if (session.payment_status === 'paid') {
+      const txId = typeof session.payment_intent === 'string' ? session.payment_intent : session.id;
+      return markPaid(payment.id, txId);
+    }
+  } catch (e) {
+    console.error('syncStripe error:', e);
+  }
+
+  return payment;
+}
+
+
 export const availableProviders = () => ({
   qpay: qpayConfigured,
   stripe: stripeConfigured,
+  wire: wireConfigured,
 });
+

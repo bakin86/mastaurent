@@ -16,10 +16,12 @@ export type User = {
   email: string;
   phone: string | null;
   role: Role;
+  isPlatformAdmin?: boolean;
   isActive?: boolean;
   avatarUrl: string | null;
   tenantId: string;
 };
+
 
 export type TenantCard = {
   id: string;
@@ -174,7 +176,7 @@ export type RestaurantRequest = {
   account?: { id: string; name: string; email: string; phone: string | null };
 };
 
-export type PaymentProvider = 'QPAY' | 'STRIPE';
+export type PaymentProvider = 'QPAY' | 'STRIPE' | 'WIRE';
 
 export type PaymentStatus = 'PENDING' | 'PAID' | 'FAILED' | 'CANCELLED' | 'REFUNDED';
 
@@ -185,7 +187,7 @@ export type Payment = {
   amount: number;
   currency: string;
   invoiceId: string | null;
-  /** Stripe-ийн төлбөрийн хуудас. */
+  /** Stripe эсвэл Wire төлбөрийн хуудас. */
   checkoutUrl: string | null;
   /** QPay QR — банкны апп руу шилжих түүхий текст. */
   qrText: string | null;
@@ -197,7 +199,8 @@ export type Payment = {
   trackToken: string | null;
 };
 
-export type PaymentProviders = { qpay: boolean; stripe: boolean };
+export type PaymentProviders = { qpay: boolean; stripe: boolean; wire?: boolean };
+
 
 export type Stats = {
   todayRevenue: number;

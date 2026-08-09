@@ -93,12 +93,43 @@ export function Pay() {
         <PaidCard />
       ) : payment.provider === 'QPAY' ? (
         <QpayCard payment={payment} />
+      ) : payment.provider === ('WIRE' as any) ? (
+        <WireCard payment={payment} />
       ) : (
         <StripeCard payment={payment} />
       )}
     </Page>
   );
 }
+
+function WireCard({ payment }: { payment: Payment }) {
+  return (
+    <Card className="mt-6 p-6">
+      <div className="flex items-center gap-2 text-[13px] text-muted">
+        <CreditCard size={15} />
+        Wire Нэгдсэн Төлбөр (Монгол Банкнууд & Карт)
+      </div>
+
+      <p className="mt-3 text-[13.5px] leading-relaxed text-muted">
+        Wire Payment Gateway-ээр дамжуулан Khan Bank, SocialPay, QPay, MonPay, HiPay болон картаар төлөх боломжтой.
+      </p>
+
+      {payment.checkoutUrl && (
+        <a href={payment.checkoutUrl} target="_blank" rel="noreferrer" className="mt-5 block">
+          <Button full size="lg">
+            Wire Төлбөрийн Хуудас Рүү Шилжих · {mnt(payment.amount)}
+          </Button>
+        </a>
+      )}
+
+      <div className="mt-5 flex items-center justify-center gap-2 border-t border-line pt-4 text-[13px] text-muted">
+        <Loader2 size={14} className="animate-spin" />
+        Төлбөрийг хүлээж байна…
+      </div>
+    </Card>
+  );
+}
+
 
 function PaidCard() {
   return (

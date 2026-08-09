@@ -47,16 +47,20 @@ const qpay = {
 const stripe = {
   secretKey: process.env.STRIPE_SECRET_KEY ?? '',
   webhookSecret: process.env.STRIPE_WEBHOOK_SECRET ?? '',
-  // Stripe MNT-г бүх бүсэд дэмждэггүй — шаардлагатай бол өөрчилнө.
   currency: (process.env.STRIPE_CURRENCY ?? 'mnt').toLowerCase(),
+};
+
+const wire = {
+  // Түлхүүрийг ЭНД БИЧИХГҮЙ — зөвхөн apps/api/.env дотор (тэр нь gitignore-д).
+  secretKey: process.env.WIRE_SECRET_KEY ?? '',
 };
 
 export const qpayConfigured = Boolean(qpay.username && qpay.password && qpay.invoiceCode);
 export const stripeConfigured = Boolean(stripe.secretKey);
+export const wireConfigured = Boolean(wire.secretKey);
 
 export const PAYMENT_SETUP_HINT =
-  'Онлайн төлбөр тохируулаагүй байна. QPay-д QPAY_USERNAME, QPAY_PASSWORD, ' +
-  'QPAY_INVOICE_CODE; Stripe-д STRIPE_SECRET_KEY-г apps/api/.env файлд тавина уу.';
+  'Онлайн төлбөр тохируулаагүй байна. QPay, Wire (WIRE_SECRET_KEY) эсвэл Stripe-г apps/api/.env файлд тавина уу.';
 
 export const env = {
   port: Number(process.env.PORT ?? 4000),
@@ -72,8 +76,14 @@ export const env = {
   cookieSameSite: (process.env.COOKIE_SAMESITE ?? 'lax') as 'lax' | 'strict' | 'none',
   qpay,
   stripe,
+  wire,
+  verifyMnApiKey: process.env.VERIFY_MN_API_KEY ?? 'vrf_wLxHceFivnL8c3v4hH_oifCiwUlhAGdv',
   isProd,
 };
+
+export const verifyMnConfigured = Boolean(env.verifyMnApiKey);
+
+
 
 // Production дээр тохиргоогүй ажиллуулах нь алдаа — тэнд шууд зогсооно.
 if (isProd && !clerkConfigured) throw new Error(SETUP_HINT);

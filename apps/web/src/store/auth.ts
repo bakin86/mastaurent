@@ -43,16 +43,25 @@ const useClerkSignOut = clerkEnabled
 
 type LocalAuth = {
   token: string | null;
+  /**
+   * refresh cookie-гоор сесс сэргээх оролдлого дууссан эсэх.
+   * Хуудсыг шинэчлэхэд localStorage хоосон байж болно — cookie нь
+   * хүчинтэй хэвээр. Энэ дуустал "нэвтрээгүй" гэж шийдэж БОЛОХГҮЙ.
+   */
+  restored: boolean;
   setToken: (token: string | null) => void;
+  markRestored: () => void;
 };
 
 /** Токеныг реактив байлгана — нэвтэрмэгц хуудсууд шинэчлэгдэнэ. */
 export const useLocalAuth = create<LocalAuth>()((set) => ({
   token: getLocalToken(),
+  restored: !!getLocalToken(),
   setToken: (token) => {
     setLocalToken(token);
     set({ token });
   },
+  markRestored: () => set({ restored: true }),
 }));
 
 type AuthResponse = { user: Account; accessToken: string };
@@ -77,6 +86,38 @@ export async function registerWithPassword(input: {
   return data.user;
 }
 
+export async function startPhoneVerify(phone: string) {
+  return await api<{
+    ok: boolean;
+    sessionId: string;
+    shortcode: string;
+    text: string;
+    smsUri: string;
+    displayInstruction: string;
+    expiresAt: string;
+  }>('/auth/phone/start', {
+    method: 'POST',
+    body: { phone },
+  });
+}
+
+
+export async function checkPhoneVerifyStatus(sessionId: string) {
+  return await api<{ verified: boolean; sessionStatus: string; phone?: string }>(`/auth/phone/status/${sessionId}`);
+}
+
+export async function verifyPhoneCode(phone: string, code?: string, sessionId?: string, name?: string) {
+  const data = await api<AuthResponse>('/auth/phone/verify', {
+    method: 'POST',
+    body: { phone, code, sessionId, name },
+  });
+  useLocalAuth.getState().setToken(data.accessToken);
+  return data.user;
+}
+
+
+
+
 // --- Сесс уншигчид ----------------------------------------------------------
 
 /**
@@ -94,10 +135,21 @@ function useClearStaleToken(error: unknown) {
   }, [error, token, setToken]);
 }
 
+/**
+ * Хүсэлт эцсийн хариугаа өгсөн үү.
+ *
+ * `isLoading` хангалтгүй: react-query-д `enabled` дөнгөж асахад, эсвэл
+ * кэшэд хуучин алдаа үлдээд ард нь дахин хүсэлт нисэж байхад `isLoading`
+ * худлаа `false` болно. Тэр агшинд "хариу нь хоосон" гэж уншвал хамгаалагдсан
+ * хуудас нэвтрэлт рүү буцаах чиглүүлэг өгчихдөг.
+ */
+const settled = (q: { isFetched: boolean; isFetching: boolean }) => q.isFetched && !q.isFetching;
+
 /** Платформын сесс — нэвтэрсэн эсэх. Ресторан хамаарахгүй. */
 export function useAccount() {
   const { isLoaded, isSignedIn: clerkSignedIn } = useSignedIn();
   const localToken = useLocalAuth((s) => s.token);
+  const restored = useLocalAuth((s) => s.restored);
   const signedIn = !!localToken || !!clerkSignedIn;
 
   const query = useQuery({
@@ -112,7 +164,7 @@ export function useAccount() {
 
   return {
     account: query.data?.user ?? null,
-    ready: (isLoaded || !!localToken) && !query.isLoading,
+    ready: (isLoaded || !!localToken) && restored && (!signedIn || settled(query)),
     isSignedIn: signedIn,
     error: query.error instanceof ApiError ? query.error : null,
   };
@@ -134,7 +186,7 @@ export function useMember(slug?: string) {
 
   return {
     user: query.data?.user ?? null,
-    ready: accountReady && !query.isLoading,
+    ready: accountReady && (!isSignedIn || !slug || settled(query)),
     isSignedIn,
     error: query.error instanceof ApiError ? query.error : null,
   };
@@ -142,26 +194,43 @@ export function useMember(slug?: string) {
 
 /** Dashboard: ажилтны гишүүнчлэл. Эрхгүй бол user null хэвээр (403). */
 export function useStaffMember() {
-  const { isSignedIn, ready: accountReady } = useAccount();
+  const { account, isSignedIn, ready: accountReady } = useAccount();
 
   const query = useQuery({
-    queryKey: ['staff-me'],
+    // Түлхүүр нь энэ endpoint-д ЗӨВХӨН харьяалагдана. Өөр хуудас ижил
+    // түлхүүрээр өөр хаяг татвал кэш холилдоод, энд `user` хоосон уншигдана.
+    queryKey: ['auth', 'staff'],
     queryFn: () => api<{ user: User }>('/auth/staff'),
     enabled: accountReady && isSignedIn,
-    // 403 = эрхгүй. Дахин оролдох нь утгагүй.
     retry: false,
     staleTime: 60_000,
   });
 
   useClearStaleToken(query.error);
 
+  let user = query.data?.user ?? null;
+  if (!user && account?.isPlatformAdmin) {
+    user = {
+      id: account.id,
+      name: account.name,
+      email: account.email,
+      phone: account.phone,
+      role: 'DIRECTOR',
+      isPlatformAdmin: true,
+      avatarUrl: null,
+      tenantId: '',
+    };
+  }
+
   return {
-    user: query.data?.user ?? null,
-    ready: accountReady && !query.isLoading,
+    user,
+    account,
+    ready: accountReady && (!isSignedIn || settled(query) || !!user),
     isSignedIn,
     error: query.error instanceof ApiError ? query.error : null,
   };
 }
+
 
 /** Аль замаар нэвтэрсэн ч ажилладаг гарах үйлдэл. */
 export function useSignOut() {
@@ -183,8 +252,20 @@ export function useSignOut() {
   };
 }
 
-/** Хуудас сэргээхэд өөрийн сессийг refresh cookie-гоор сэргээнэ. */
+/**
+ * Хуудас сэргээхэд өөрийн сессийг refresh cookie-гоор сэргээнэ.
+ * Дуусмагц `restored` тэмдэглэнэ — түүнээс өмнө хамгаалагдсан хуудсууд
+ * "нэвтрээгүй" гэж шийдэхгүй, хүлээнэ.
+ */
 export async function restoreLocalSession() {
-  if (getLocalToken()) return;
-  if (await refreshLocalToken()) useLocalAuth.getState().setToken(getLocalToken());
+  const { markRestored, setToken } = useLocalAuth.getState();
+  if (getLocalToken()) {
+    markRestored();
+    return;
+  }
+  try {
+    if (await refreshLocalToken()) setToken(getLocalToken());
+  } finally {
+    markRestored();
+  }
 }

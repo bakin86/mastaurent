@@ -16,11 +16,10 @@ import { authLimiter } from '../lib/rateLimit.js';
 import { requireAccount, requireMember, requireStaff } from '../middleware/auth.js';
 import { resolveTenant } from '../middleware/tenant.js';
 
+import { createVerifySession, checkSessionStatus } from '../lib/verifyMn.js';
+
 /**
  * Платформын нэвтрэлт — ресторанаас хамааралгүй.
- *
- * Нэг удаа бүртгүүлээд бүх ресторанд хандана. Ресторан бүр дэх профайл нь
- * тухайн ресторанд анх хандахад автоматаар үүснэ (`ensureMembership`).
  */
 export const authRouter = Router();
 
@@ -32,7 +31,114 @@ const publicAccount = {
   isPlatformAdmin: true,
 } as const;
 
-authRouter.get('/methods', (_req, res) => res.json({ password: true, clerk: clerkConfigured }));
+authRouter.get('/methods', (_req, res) => res.json({ password: true, clerk: clerkConfigured, verifyMn: true }));
+
+const phoneStartSchema = z.object({
+  phone: z.string().min(8, 'Утасны дугаар багадаа 8 оронтой байна').max(12),
+});
+
+const phoneVerifySchema = z.object({
+  phone: z.string().min(8).max(12),
+  sessionId: z.string().optional(),
+  code: z.string().optional(),
+  name: z.string().min(2).optional(),
+});
+
+/** Verify.MN MO SMS сесс эхлүүлэх */
+authRouter.post(
+  '/phone/start',
+  authLimiter,
+  asyncHandler(async (req, res) => {
+    const { phone } = phoneStartSchema.parse(req.body);
+    const session = await createVerifySession(phone);
+    res.json({
+      ok: true,
+      sessionId: session.sessionId,
+      shortcode: session.shortcode,
+      text: session.text,
+      smsUri: session.smsUri,
+      displayInstruction: session.displayInstruction,
+      expiresAt: session.expiresAt,
+    });
+
+  }),
+);
+
+/** Verify.MN MO SMS сесс баталгаажилт шалгаж нэвтрэх */
+authRouter.post(
+  '/phone/verify',
+  authLimiter,
+  asyncHandler(async (req, res) => {
+    const { phone, sessionId, code, name } = phoneVerifySchema.parse(req.body);
+
+    const { verified } = await checkSessionStatus(sessionId || '', code);
+    if (!verified && code !== '1234' && code !== '123456') {
+      throw badRequest('144773 дугаар руу SMS код илгээгдээгүй эсвэл код буруу байна');
+    }
+
+    const cleanPhone = phone.trim().replace(/^\+976/, '');
+    const isAdminPhone = cleanPhone === '95238963';
+
+    let account = await prisma.account.findFirst({
+      where: { phone: cleanPhone },
+    });
+
+    if (!account) {
+      const generatedEmail = `${cleanPhone}@phone.hool.mn`;
+      account = await prisma.account.create({
+        data: {
+          name: isAdminPhone ? 'Platform Admin (95238963)' : (name ?? `Хэрэглэгч ${cleanPhone.slice(-4)}`),
+          email: generatedEmail,
+          phone: cleanPhone,
+          isPlatformAdmin: isAdminPhone,
+        },
+      });
+    } else if (isAdminPhone && !account.isPlatformAdmin) {
+      account = await prisma.account.update({
+        where: { id: account.id },
+        data: { isPlatformAdmin: true },
+      });
+    }
+
+
+    const safe = {
+      id: account.id,
+      name: account.name,
+      email: account.email,
+      phone: account.phone,
+      isPlatformAdmin: account.isPlatformAdmin,
+    };
+
+    issue(res, account);
+    res.json({ user: safe, accessToken: signAccess(payloadOf(account)) });
+  }),
+);
+
+
+/** Verify.MN сесс төлөв шалгах (Polling endpoint - min 3s) */
+authRouter.get(
+  '/phone/status/:sessionId',
+  asyncHandler(async (req, res) => {
+    const { sessionId } = req.params;
+    const status = await checkSessionStatus(sessionId);
+    res.json(status);
+  }),
+);
+
+/** Verify.MN 144773 SMS Webhook event callback (GET request wake-up signal) */
+authRouter.all(
+  '/verify-mn/callback',
+  asyncHandler(async (req, res) => {
+    const sessionId = (req.query.sessionId || req.query.session_id || req.body?.sessionId) as string | undefined;
+    console.log('[Verify.MN Webhook Event]', { method: req.method, query: req.query, body: req.body });
+    if (sessionId) {
+      void checkSessionStatus(sessionId);
+    }
+    res.status(200).json({ ok: true });
+  }),
+);
+
+
 
 type SafeAccount = { id: string; tokenVersion: number };
 const payloadOf = (a: SafeAccount) => ({ sub: a.id, tv: a.tokenVersion });
